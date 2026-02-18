@@ -1,6 +1,5 @@
 import random
 from copy import copy
-import pygame
 
 board_size = 5
 import time
@@ -208,6 +207,7 @@ class WarehouseEnv(object):
         print('charge stations: ', self.charge_stations)
 
     def _pygame_print_robot_data(self, robot, canvas, robot_index):
+        import pygame
 
         robot_pos = robot.position
         robot_pos_txt = 'position: ' + str(robot_pos)
@@ -250,6 +250,8 @@ class WarehouseEnv(object):
 
 
     def pygame_print(self):
+        import pygame
+
         if self.window is None:
             pygame.init()
             self.window = pygame.display.set_mode((720, 720))
