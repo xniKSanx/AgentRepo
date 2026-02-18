@@ -9,6 +9,7 @@ from datetime import datetime
 from WarehouseEnv import WarehouseEnv, manhattan_distance, board_size
 import Agent
 import submission
+from batch_runner import run_batch
 
 # =============================================================================
 #                               Constants
@@ -509,25 +510,59 @@ class SettingsScreen:
         self.agent0_name = agent0_name
         self.agent1_name = agent1_name
 
-        self.time_input = NumberInput(160, 260, "Time Limit (s):", 1.0, 0.1, 30.0, step=0.5, is_float=True)
-        self.seed_input = NumberInput(160, 330, "Seed (0=random):", 0, 0, 9999, step=1)
-        self.steps_input = NumberInput(160, 400, "Max Rounds:", 4761, 10, 99999, step=100)
+        # Shared settings (always visible)
+        self.time_input = NumberInput(160, 240, "Time Limit (s):", 1.0, 0.1, 30.0, step=0.5, is_float=True)
+        self.seed_input = NumberInput(160, 300, "Seed (0=random):", 0, 0, 9999, step=1)
+        self.steps_input = NumberInput(160, 360, "Max Rounds:", 4761, 10, 99999, step=100)
 
-        self.log_checkbox = Checkbox(160, 450, "Enable Game Logging")
+        # Mode toggle
+        self.batch_checkbox = Checkbox(160, 420, "Enable Batch Mode")
 
-        self.back_btn = Button(160, 500, 140, 45, "Back", font_size=20)
-        self.play_btn = Button(420, 500, 140, 45, "Play", color=GREEN,
+        # Single-game widgets
+        self.log_checkbox = Checkbox(160, 470, "Enable Game Logging")
+
+        # Batch-mode widgets
+        self.num_games_input = NumberInput(160, 470, "Num Games:", 100, 1, 10000, step=10)
+        self.log_rate_input = NumberInput(160, 530, "Log Sample Rate:", 0, 0, 1000, step=1)
+        self.csv_checkbox = Checkbox(160, 590, "Save CSV Output")
+
+        # Buttons (position depends on mode)
+        self.back_btn = Button(160, 540, 140, 45, "Back", font_size=20)
+        self.play_btn = Button(420, 540, 140, 45, "Play", color=GREEN,
                                hover_color=(50, 160, 50), text_color=WHITE, font_size=22)
+
+    def _update_batch_mode_layout(self):
+        if self.batch_checkbox.is_checked():
+            self.seed_input.label = "Seed Start (0=random):"
+            self.play_btn.text = "Run Batch"
+            self.play_btn.rect.y = 650
+            self.back_btn.rect.y = 650
+        else:
+            self.seed_input.label = "Seed (0=random):"
+            self.play_btn.text = "Play"
+            self.play_btn.rect.y = 540
+            self.back_btn.rect.y = 540
 
     def handle_event(self, event):
         self.time_input.handle_event(event)
         self.seed_input.handle_event(event)
         self.steps_input.handle_event(event)
-        self.log_checkbox.handle_event(event)
+
+        if self.batch_checkbox.handle_event(event):
+            self._update_batch_mode_layout()
+
+        if self.batch_checkbox.is_checked():
+            self.num_games_input.handle_event(event)
+            self.log_rate_input.handle_event(event)
+            self.csv_checkbox.handle_event(event)
+        else:
+            self.log_checkbox.handle_event(event)
 
         if self.back_btn.handle_event(event):
             return "back"
         if self.play_btn.handle_event(event):
+            if self.batch_checkbox.is_checked():
+                return "run_batch"
             return "play"
         return None
 
@@ -547,23 +582,42 @@ class SettingsScreen:
         self.time_input.draw(surface)
         self.seed_input.draw(surface)
         self.steps_input.draw(surface)
-        self.log_checkbox.draw(surface)
+        self.batch_checkbox.draw(surface)
+
+        if self.batch_checkbox.is_checked():
+            self.num_games_input.draw(surface)
+            self.log_rate_input.draw(surface)
+            self.csv_checkbox.draw(surface)
+        else:
+            self.log_checkbox.draw(surface)
 
         self.back_btn.draw(surface)
         self.play_btn.draw(surface)
 
     def get_config(self):
         seed_val = int(self.seed_input.get_value())
-        if seed_val == 0:
-            seed_val = random.randint(0, 255)
-        return {
+
+        config = {
             "agent0": self.agent0_name,
             "agent1": self.agent1_name,
             "time_limit": self.time_input.get_value(),
-            "seed": seed_val,
             "count_steps": int(self.steps_input.get_value()),
-            "logging_enabled": self.log_checkbox.is_checked(),
         }
+
+        if self.batch_checkbox.is_checked():
+            config["batch_mode"] = True
+            config["seed_start"] = seed_val if seed_val != 0 else None
+            config["num_games"] = int(self.num_games_input.get_value())
+            config["log_sampling_rate"] = int(self.log_rate_input.get_value())
+            config["csv"] = self.csv_checkbox.is_checked()
+            config["output_dir"] = "batch_results"
+            config["fail_fast"] = False
+            config["seed_list_file"] = None
+        else:
+            config["seed"] = seed_val if seed_val != 0 else random.randint(0, 255)
+            config["logging_enabled"] = self.log_checkbox.is_checked()
+
+        return config
 
 
 # =============================================================================
@@ -606,6 +660,74 @@ class AgentWorker:
 
     def get_error(self):
         return self.error
+
+
+# =============================================================================
+#                         Batch Progress (Threading)
+# =============================================================================
+
+
+class BatchProgress:
+    """Thread-safe shared state between batch worker thread and BatchScreen."""
+
+    def __init__(self, total):
+        self.lock = threading.Lock()
+        self.total = total
+        self.completed = 0
+        self.wins_0 = 0
+        self.wins_1 = 0
+        self.draws = 0
+        self.errors = 0
+        self.finished = False
+        self.error_message = None
+        self.summary = None
+        self.total_wall_time = None
+
+    def update_after_game(self, result):
+        with self.lock:
+            self.completed += 1
+            if result.error is not None:
+                self.errors += 1
+            elif result.winner == 0:
+                self.wins_0 += 1
+            elif result.winner == 1:
+                self.wins_1 += 1
+            else:
+                self.draws += 1
+
+    def snapshot(self):
+        with self.lock:
+            return {
+                "completed": self.completed,
+                "total": self.total,
+                "wins_0": self.wins_0,
+                "wins_1": self.wins_1,
+                "draws": self.draws,
+                "errors": self.errors,
+                "finished": self.finished,
+                "error_message": self.error_message,
+                "summary": self.summary,
+                "total_wall_time": self.total_wall_time,
+            }
+
+
+def _batch_worker(config, progress):
+    """Runs in a background thread. Calls run_batch with a progress callback."""
+    def on_game_complete(completed, total, results_so_far):
+        progress.update_after_game(results_so_far[-1])
+
+    try:
+        summary, results, total_wall_time = run_batch(
+            config, progress_callback=on_game_complete
+        )
+        with progress.lock:
+            progress.summary = summary
+            progress.total_wall_time = total_wall_time
+            progress.finished = True
+    except Exception as e:
+        with progress.lock:
+            progress.error_message = str(e)
+            progress.finished = True
 
 
 # =============================================================================
@@ -946,6 +1068,151 @@ class GameScreen:
 
 
 # =============================================================================
+#                              Batch Screen
+# =============================================================================
+
+
+class BatchScreen:
+    def __init__(self, config):
+        self.config = config
+        self.agent0_name = config["agent0"]
+        self.agent1_name = config["agent1"]
+        self.num_games = config["num_games"]
+
+        # Shared progress state
+        self.progress = BatchProgress(self.num_games)
+
+        # Start worker thread
+        self.thread = threading.Thread(
+            target=_batch_worker,
+            args=(config, self.progress),
+            daemon=True,
+        )
+        self.thread.start()
+
+        # Local snapshot for rendering (updated each frame)
+        self.snap = self.progress.snapshot()
+
+        # UI elements
+        self.new_game_btn = Button(
+            260, 780, 200, 50, "New Game", color=RED,
+            hover_color=(190, 50, 50), text_color=WHITE, font_size=20
+        )
+        self.new_game_btn.enabled = False
+
+    def handle_event(self, event):
+        if self.new_game_btn.handle_event(event):
+            return "new_game"
+        return None
+
+    def update(self):
+        self.snap = self.progress.snapshot()
+        self.new_game_btn.enabled = self.snap["finished"]
+
+    def draw(self, surface):
+        self._draw_header(surface)
+        self._draw_progress_bar(surface)
+        self._draw_live_tallies(surface)
+        if self.snap["finished"]:
+            self._draw_final_summary(surface)
+        self.new_game_btn.draw(surface)
+
+    def _draw_header(self, surface):
+        title_font = get_font(28, bold=True)
+        title = title_font.render("Batch Run", True, BLACK)
+        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=30))
+
+        sub_font = get_font(20)
+        matchup = sub_font.render(
+            f"{self.agent0_name}  vs  {self.agent1_name}  |  {self.num_games} games",
+            True, DARK_GRAY
+        )
+        surface.blit(matchup, matchup.get_rect(centerx=WINDOW_WIDTH // 2, y=70))
+
+    def _draw_progress_bar(self, surface):
+        bar_x, bar_y = 60, 130
+        bar_w, bar_h = 600, 40
+
+        # Background
+        pygame.draw.rect(surface, LIGHT_GRAY, (bar_x, bar_y, bar_w, bar_h), border_radius=6)
+        pygame.draw.rect(surface, DARK_GRAY, (bar_x, bar_y, bar_w, bar_h), width=2, border_radius=6)
+
+        # Filled portion
+        completed = self.snap["completed"]
+        total = self.snap["total"]
+        if total > 0:
+            fill_w = int(bar_w * completed / total)
+            if fill_w > 0:
+                fill_rect = pygame.Rect(bar_x, bar_y, fill_w, bar_h)
+                pygame.draw.rect(surface, GREEN, fill_rect, border_radius=6)
+
+        # Text overlay
+        pct = (completed / total * 100) if total > 0 else 0
+        font = get_font(20, bold=True)
+        text = font.render(f"{completed} / {total}  ({pct:.0f}%)", True, BLACK)
+        surface.blit(text, text.get_rect(center=(bar_x + bar_w // 2, bar_y + bar_h // 2)))
+
+    def _draw_live_tallies(self, surface):
+        font = get_font(22)
+        bold_font = get_font(22, bold=True)
+        y_start = 210
+        spacing = 40
+
+        lines = [
+            (f"Robot 0 ({self.agent0_name}) wins:", str(self.snap["wins_0"]), BLUE),
+            (f"Robot 1 ({self.agent1_name}) wins:", str(self.snap["wins_1"]), RED),
+            ("Draws:", str(self.snap["draws"]), DARK_GRAY),
+            ("Errors:", str(self.snap["errors"]), ORANGE),
+        ]
+
+        for i, (label, value, color) in enumerate(lines):
+            y = y_start + i * spacing
+            label_surf = font.render(label, True, BLACK)
+            surface.blit(label_surf, (80, y))
+            value_surf = bold_font.render(value, True, color)
+            surface.blit(value_surf, (520, y))
+
+    def _draw_final_summary(self, surface):
+        summary = self.snap["summary"]
+        if summary is None:
+            font = get_font(20)
+            err = font.render(f"Batch failed: {self.snap['error_message']}", True, RED)
+            surface.blit(err, err.get_rect(centerx=WINDOW_WIDTH // 2, y=420))
+            return
+
+        # Divider
+        pygame.draw.line(surface, GRAY, (60, 400), (660, 400), width=2)
+
+        bold_font = get_font(20, bold=True)
+        font = get_font(18)
+        y = 420
+
+        title = bold_font.render("Final Results", True, BLACK)
+        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=y))
+        y += 35
+
+        lines = [
+            f"Win rate R0: {summary['win_rate_0']:.1%}    Win rate R1: {summary['win_rate_1']:.1%}    Draw rate: {summary['draw_rate']:.1%}",
+            f"Mean credits R0: {summary['mean_credits_0']}  (p25={summary['p25_credits_0']}, p75={summary['p75_credits_0']})",
+            f"Mean credits R1: {summary['mean_credits_1']}  (p25={summary['p25_credits_1']}, p75={summary['p75_credits_1']})",
+            f"Mean steps: {summary['mean_steps']}",
+            f"Timeout rate R0: {summary['timeout_rate_0']:.1%}    R1: {summary['timeout_rate_1']:.1%}",
+            f"Error rate: {summary['error_rate']:.1%}",
+        ]
+
+        wall = self.snap.get("total_wall_time")
+        if wall is not None:
+            lines.append(f"Total wall time: {wall:.1f}s")
+
+        lines.append(f"Output saved to: {self.config.get('output_dir', 'batch_results')}/")
+
+        for line in lines:
+            text = font.render(line, True, BLACK)
+            surface.blit(text, (80, y))
+            y += 28
+
+
+# =============================================================================
 #                            Game Runner (App Controller)
 # =============================================================================
 
@@ -961,6 +1228,7 @@ class GameRunner:
         self.setup_screen = SetupScreen()
         self.settings_screen = None
         self.game_screen = None
+        self.batch_screen = None
         self.current_screen = "setup"
 
     def run(self):
@@ -994,6 +1262,10 @@ class GameRunner:
                 config = self.settings_screen.get_config()
                 self.game_screen = GameScreen(config)
                 self.current_screen = "game"
+            elif result == "run_batch":
+                config = self.settings_screen.get_config()
+                self.batch_screen = BatchScreen(config)
+                self.current_screen = "batch"
             elif result == "back":
                 self.current_screen = "setup"
 
@@ -1004,9 +1276,18 @@ class GameRunner:
                 self.current_screen = "setup"
                 self.game_screen = None
 
+        elif self.current_screen == "batch":
+            result = self.batch_screen.handle_event(event)
+            if result == "new_game":
+                self.setup_screen = SetupScreen()
+                self.current_screen = "setup"
+                self.batch_screen = None
+
     def _update(self):
         if self.current_screen == "game" and self.game_screen:
             self.game_screen.update()
+        elif self.current_screen == "batch" and self.batch_screen:
+            self.batch_screen.update()
 
     def _draw(self):
         self.screen.fill(PANEL_BG)
@@ -1016,6 +1297,8 @@ class GameRunner:
             self.settings_screen.draw(self.screen)
         elif self.current_screen == "game":
             self.game_screen.draw(self.screen)
+        elif self.current_screen == "batch":
+            self.batch_screen.draw(self.screen)
         pygame.display.flip()
 
 

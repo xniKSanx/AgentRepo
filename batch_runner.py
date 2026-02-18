@@ -42,16 +42,21 @@ class GameResult:
     wall_time_seconds: float
 
 
-def resolve_seeds(args):
-    """Determine the list of seeds for the batch."""
-    if args.seed_list_file:
-        with open(args.seed_list_file) as f:
+def resolve_seeds(config):
+    """Determine the list of seeds for the batch.
+
+    Config keys: seed_list_file, seed_start, num_games.
+    """
+    if config.get("seed_list_file"):
+        with open(config["seed_list_file"]) as f:
             seeds = [int(line.strip()) for line in f if line.strip()]
         if not seeds:
-            raise ValueError(f"Seed list file '{args.seed_list_file}' is empty")
+            raise ValueError(f"Seed list file '{config['seed_list_file']}' is empty")
         return seeds
-    seed_start = args.seed_start if args.seed_start is not None else random.randint(0, 255)
-    return [seed_start + i for i in range(args.num_games)]
+    seed_start = config.get("seed_start")
+    if seed_start is None or seed_start == 0:
+        seed_start = random.randint(0, 255)
+    return [seed_start + i for i in range(config["num_games"])]
 
 
 def capture_initial_state(env, seed):
@@ -188,8 +193,11 @@ def percentile(sorted_list, pct):
     return sorted_list[f] + (k - f) * (sorted_list[c] - sorted_list[f])
 
 
-def compute_summary(args, results):
-    """Compute aggregate statistics from game results."""
+def compute_summary(config, results):
+    """Compute aggregate statistics from game results.
+
+    Config keys used: agent0, agent1.
+    """
     completed = [r for r in results if r.error is None]
     n = len(completed) if completed else 1  # avoid division by zero
     total = len(results) if results else 1
@@ -199,8 +207,8 @@ def compute_summary(args, results):
     all_steps = [r.steps_taken for r in completed]
 
     return {
-        "agent0": args.agent0,
-        "agent1": args.agent1,
+        "agent0": config["agent0"],
+        "agent1": config["agent1"],
         "num_games": len(results),
         "num_completed": len(completed),
         "num_errors": len(results) - len(completed),
@@ -223,24 +231,28 @@ def compute_summary(args, results):
     }
 
 
-def build_manifest(args, seeds):
-    """Build a manifest dict capturing the full batch configuration."""
+def build_manifest(config, seeds):
+    """Build a manifest dict capturing the full batch configuration.
+
+    Config keys used: agent0, agent1, time_limit, count_steps, fail_fast,
+    log_sampling_rate, csv, seed_list_file, command (optional).
+    """
     return {
         "created_at": datetime.now().isoformat(),
-        "command": " ".join(sys.argv),
+        "command": config.get("command", "game_runner_gui"),
         "configuration": {
-            "agent0": args.agent0,
-            "agent1": args.agent1,
+            "agent0": config["agent0"],
+            "agent1": config["agent1"],
             "num_games": len(seeds),
-            "time_limit": args.time_limit,
-            "count_steps": args.count_steps,
-            "fail_fast": args.fail_fast,
-            "log_sampling_rate": args.log_sampling_rate,
-            "csv_output": args.csv,
+            "time_limit": config.get("time_limit", 1.0),
+            "count_steps": config.get("count_steps", 4761),
+            "fail_fast": config.get("fail_fast", False),
+            "log_sampling_rate": config.get("log_sampling_rate", 0),
+            "csv_output": config.get("csv", False),
         },
         "seed_sequence": seeds,
         "seed_source": (
-            f"file:{args.seed_list_file}" if args.seed_list_file
+            f"file:{config['seed_list_file']}" if config.get("seed_list_file")
             else f"sequential_from:{seeds[0]}"
         ),
         "environment": {
@@ -255,7 +267,6 @@ def write_manifest(manifest, output_dir):
     filepath = os.path.join(output_dir, 'batch_manifest.json')
     with open(filepath, 'w') as f:
         json.dump(manifest, f, indent=2)
-    print(f"[Batch] Manifest written to {filepath}", file=sys.stderr)
 
 
 def write_json_summary(summary, results, output_dir, total_wall_time):
@@ -276,7 +287,6 @@ def write_json_summary(summary, results, output_dir, total_wall_time):
     filepath = os.path.join(output_dir, 'batch_summary.json')
     with open(filepath, 'w') as f:
         json.dump(output, f, indent=2)
-    print(f"[Batch] Summary written to {filepath}", file=sys.stderr)
 
 
 def write_csv_output(results, output_dir):
@@ -301,7 +311,6 @@ def write_csv_output(results, output_dir):
                 r.error or '',
                 r.wall_time_seconds,
             ])
-    print(f"[Batch] CSV written to {filepath}", file=sys.stderr)
 
 
 def print_final_summary(summary):
@@ -327,79 +336,75 @@ def print_final_summary(summary):
     print("=" * 50)
 
 
-def run_batch(args):
-    """Main entry point for the batch subcommand."""
+def run_batch(config, progress_callback=None):
+    """Run a batch of games between two agents.
+
+    Args:
+        config: dict with keys: agent0, agent1, num_games, seed_start,
+                time_limit, count_steps, output_dir, log_sampling_rate,
+                fail_fast, csv, seed_list_file (optional keys use defaults).
+        progress_callback: optional callable(completed, total, results_so_far)
+                          called after each game completes.
+
+    Returns:
+        (summary_dict, results_list, total_wall_time_seconds)
+    """
     # Validate agent names
-    for name_attr in ('agent0', 'agent1'):
-        name = getattr(args, name_attr)
+    for name_key in ('agent0', 'agent1'):
+        name = config[name_key]
         if name not in VALID_AGENT_NAMES:
-            print(f"Error: Unknown agent '{name}'. Valid agents: {VALID_AGENT_NAMES}",
-                  file=sys.stderr)
-            sys.exit(1)
+            raise ValueError(f"Unknown agent '{name}'. Valid agents: {VALID_AGENT_NAMES}")
 
     # Resolve seeds
-    seeds = resolve_seeds(args)
+    seeds = resolve_seeds(config)
+    output_dir = config.get("output_dir", "batch_results")
 
     # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     # Write manifest before running
-    manifest = build_manifest(args, seeds)
-    write_manifest(manifest, args.output_dir)
+    manifest = build_manifest(config, seeds)
+    write_manifest(manifest, output_dir)
 
     # Run games
     results = []
-    progress_interval = max(1, len(seeds) // 10)
     batch_start = time.time()
-
-    print(f"[Batch] Starting {len(seeds)} games: {args.agent0} vs {args.agent1}",
-          file=sys.stderr)
+    log_sampling_rate = config.get("log_sampling_rate", 0)
+    fail_fast = config.get("fail_fast", False)
 
     for i, seed in enumerate(seeds):
-        # Progress reporting
-        if i > 0 and i % progress_interval == 0:
-            pct = (i / len(seeds)) * 100
-            wins_0 = sum(1 for r in results if r.winner == 0)
-            wins_1 = sum(1 for r in results if r.winner == 1)
-            errors = sum(1 for r in results if r.error is not None)
-            print(f"[Progress] {pct:.0f}% ({i}/{len(seeds)}) | "
-                  f"W0:{wins_0} W1:{wins_1} E:{errors}",
-                  file=sys.stderr)
-
         # Determine if this game should be logged
-        log_this_game = (args.log_sampling_rate > 0
-                         and i % args.log_sampling_rate == 0)
+        log_this_game = (log_sampling_rate > 0
+                         and i % log_sampling_rate == 0)
 
         result = run_single_game(
-            agent0_name=args.agent0,
-            agent1_name=args.agent1,
+            agent0_name=config["agent0"],
+            agent1_name=config["agent1"],
             seed=seed,
-            count_steps=args.count_steps,
-            time_limit=args.time_limit,
+            count_steps=config.get("count_steps", 4761),
+            time_limit=config.get("time_limit", 1.0),
             game_index=i,
             log_this_game=log_this_game,
-            output_dir=args.output_dir,
+            output_dir=output_dir,
         )
         results.append(result)
 
+        if progress_callback:
+            progress_callback(i + 1, len(seeds), results)
+
         # Fail-fast check
-        if args.fail_fast and result.error is not None:
-            print(f"[FAIL FAST] Aborting batch at game {i} due to error: "
-                  f"{result.error}", file=sys.stderr)
+        if fail_fast and result.error is not None:
             break
 
     total_wall_time = time.time() - batch_start
 
     # Compute aggregate statistics
-    summary = compute_summary(args, results)
+    summary = compute_summary(config, results)
 
     # Write outputs
-    write_json_summary(summary, results, args.output_dir, total_wall_time)
+    write_json_summary(summary, results, output_dir, total_wall_time)
 
-    if args.csv:
-        write_csv_output(results, args.output_dir)
+    if config.get("csv", False):
+        write_csv_output(results, output_dir)
 
-    # Print final summary to stdout
-    print_final_summary(summary)
-
-    print(f"\n[Batch] Complete. Output in {args.output_dir}/", file=sys.stderr)
+    return summary, results, total_wall_time

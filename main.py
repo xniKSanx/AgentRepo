@@ -168,8 +168,13 @@ def run_agents():
     args = parser.parse_args(detect_and_normalize_argv())
 
     if args.command == 'batch':
-        from batch_runner import run_batch
-        run_batch(args)
+        from batch_runner import run_batch, print_final_summary
+        config = vars(args)
+        config["command"] = " ".join(sys.argv)
+        summary, results, wall_time = run_batch(config)
+        print_final_summary(summary)
+        print(f"\n[Batch] Complete. Output in {config.get('output_dir', 'batch_results')}/",
+              file=sys.stderr)
     elif args.command == 'run':
         run_single_or_tournament(args)
     else:
