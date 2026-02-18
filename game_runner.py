@@ -604,17 +604,55 @@ def create_agents():
 # =============================================================================
 
 
-class SetupScreen:
+class OpeningScreen:
     def __init__(self):
-        self.dropdown0 = Dropdown(220, 250, 280, 40, AGENT_NAMES, default_index=0)
-        self.dropdown1 = Dropdown(220, 370, 280, 40, AGENT_NAMES, default_index=1)
-        self.start_btn = Button(260, 480, 200, 50, "Start Game", color=GREEN,
-                                hover_color=(50, 160, 50), text_color=WHITE, font_size=22)
-        self.replay_btn = Button(260, 550, 200, 50, "Replay Log", color=BLUE,
-                                 hover_color=(50, 110, 210), text_color=WHITE, font_size=22)
+        self.single_btn = Button(210, 340, 300, 55, "Start Single Game", color=GREEN,
+                                 hover_color=(50, 160, 50), text_color=WHITE, font_size=22)
+        self.batch_btn = Button(210, 420, 300, 55, "Start Batch Check", color=BLUE,
+                                hover_color=(50, 110, 210), text_color=WHITE, font_size=22)
+        self.replay_btn = Button(210, 500, 300, 55, "Replay Log",
+                                 hover_color=HOVER_GRAY, font_size=22)
 
     def handle_event(self, event):
-        # Handle dropdowns (expanded one first to capture clicks)
+        if self.single_btn.handle_event(event):
+            return "single"
+        if self.batch_btn.handle_event(event):
+            return "batch"
+        if self.replay_btn.handle_event(event):
+            return "replay"
+        return None
+
+    def draw(self, surface):
+        title_font = get_font(36, bold=True)
+        title = title_font.render("AI Warehouse Game Runner", True, BLACK)
+        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=160))
+
+        sub_font = get_font(18)
+        subtitle = sub_font.render("Select a mode to begin", True, DARK_GRAY)
+        surface.blit(subtitle, subtitle.get_rect(centerx=WINDOW_WIDTH // 2, y=230))
+
+        self.single_btn.draw(surface)
+        self.batch_btn.draw(surface)
+        self.replay_btn.draw(surface)
+
+
+class SingleGameSetupScreen:
+    def __init__(self):
+        self.dropdown0 = Dropdown(160, 165, 400, 40, AGENT_NAMES, default_index=0)
+        self.dropdown1 = Dropdown(160, 255, 400, 40, AGENT_NAMES, default_index=1)
+
+        self.time_input = NumberInput(160, 340, "Time Limit (s):", 1.0, 0.1, 30.0, step=0.5, is_float=True)
+        self.seed_input = NumberInput(160, 400, "Seed (0=random):", 0, 0, 9999, step=1)
+        self.steps_input = NumberInput(160, 460, "Max Rounds:", 4761, 10, 99999, step=100)
+
+        self.log_checkbox = Checkbox(160, 530, "Enable Game Logging")
+
+        self.back_btn = Button(160, 610, 140, 45, "Back", font_size=20)
+        self.start_btn = Button(420, 610, 140, 45, "Start", color=GREEN,
+                                hover_color=(50, 160, 50), text_color=WHITE, font_size=22)
+
+    def handle_event(self, event):
+        # Handle expanded dropdowns first to capture clicks
         if self.dropdown0.is_expanded():
             self.dropdown0.handle_event(event)
             return None
@@ -625,167 +663,156 @@ class SetupScreen:
         self.dropdown0.handle_event(event)
         self.dropdown1.handle_event(event)
 
-        if self.start_btn.handle_event(event):
-            return "start"
-        if self.replay_btn.handle_event(event):
-            return "replay"
-        return None
-
-    def draw(self, surface):
-        # Title
-        title_font = get_font(32, bold=True)
-        title = title_font.render("AI Warehouse Game Runner", True, BLACK)
-        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=80))
-
-        # Subtitle
-        sub_font = get_font(18)
-        subtitle = sub_font.render("Select the two agents to compete", True, DARK_GRAY)
-        surface.blit(subtitle, subtitle.get_rect(centerx=WINDOW_WIDTH // 2, y=130))
-
-        # Labels
-        label_font = get_font(22, bold=True)
-        lbl0 = label_font.render("Robot 0 (Blue):", True, BLUE)
-        surface.blit(lbl0, (220, 218))
-        lbl1 = label_font.render("Robot 1 (Red):", True, RED)
-        surface.blit(lbl1, (220, 338))
-
-        # Draw non-expanded dropdown first, expanded one last (on top)
-        if self.dropdown1.is_expanded():
-            self.dropdown0.draw(surface)
-            self.start_btn.draw(surface)
-            self.replay_btn.draw(surface)
-            self.dropdown1.draw(surface)
-        elif self.dropdown0.is_expanded():
-            self.dropdown1.draw(surface)
-            self.start_btn.draw(surface)
-            self.replay_btn.draw(surface)
-            self.dropdown0.draw(surface)
-        else:
-            self.dropdown0.draw(surface)
-            self.dropdown1.draw(surface)
-            self.start_btn.draw(surface)
-            self.replay_btn.draw(surface)
-
-    def get_agent0(self):
-        return self.dropdown0.selected
-
-    def get_agent1(self):
-        return self.dropdown1.selected
-
-
-class SettingsScreen:
-    def __init__(self, agent0_name, agent1_name):
-        self.agent0_name = agent0_name
-        self.agent1_name = agent1_name
-
-        # Shared settings (always visible)
-        self.time_input = NumberInput(160, 240, "Time Limit (s):", 1.0, 0.1, 30.0, step=0.5, is_float=True)
-        self.seed_input = NumberInput(160, 300, "Seed (0=random):", 0, 0, 9999, step=1)
-        self.steps_input = NumberInput(160, 360, "Max Rounds:", 4761, 10, 99999, step=100)
-
-        # Mode toggle
-        self.batch_checkbox = Checkbox(160, 420, "Enable Batch Mode")
-
-        # Single-game widgets
-        self.log_checkbox = Checkbox(160, 470, "Enable Game Logging")
-
-        # Batch-mode widgets
-        self.num_games_input = NumberInput(160, 470, "Num Games:", 100, 1, 10000, step=10)
-        self.log_rate_input = NumberInput(160, 530, "Log Sample Rate:", 0, 0, 1000, step=1)
-        self.csv_checkbox = Checkbox(160, 590, "Save CSV Output")
-
-        # Buttons (position depends on mode)
-        self.back_btn = Button(160, 540, 140, 45, "Back", font_size=20)
-        self.play_btn = Button(420, 540, 140, 45, "Play", color=GREEN,
-                               hover_color=(50, 160, 50), text_color=WHITE, font_size=22)
-
-    def _update_batch_mode_layout(self):
-        if self.batch_checkbox.is_checked():
-            self.seed_input.label = "Seed Start (0=random):"
-            self.play_btn.text = "Run Batch"
-            self.play_btn.rect.y = 650
-            self.back_btn.rect.y = 650
-        else:
-            self.seed_input.label = "Seed (0=random):"
-            self.play_btn.text = "Play"
-            self.play_btn.rect.y = 540
-            self.back_btn.rect.y = 540
-
-    def handle_event(self, event):
         self.time_input.handle_event(event)
         self.seed_input.handle_event(event)
         self.steps_input.handle_event(event)
-
-        if self.batch_checkbox.handle_event(event):
-            self._update_batch_mode_layout()
-
-        if self.batch_checkbox.is_checked():
-            self.num_games_input.handle_event(event)
-            self.log_rate_input.handle_event(event)
-            self.csv_checkbox.handle_event(event)
-        else:
-            self.log_checkbox.handle_event(event)
+        self.log_checkbox.handle_event(event)
 
         if self.back_btn.handle_event(event):
             return "back"
-        if self.play_btn.handle_event(event):
-            if self.batch_checkbox.is_checked():
-                return "run_batch"
-            return "play"
+        if self.start_btn.handle_event(event):
+            return "start"
         return None
 
     def draw(self, surface):
         title_font = get_font(28, bold=True)
-        title = title_font.render("Game Settings", True, BLACK)
-        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=80))
+        title = title_font.render("Single Game Setup", True, BLACK)
+        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=60))
 
-        matchup_font = get_font(20)
-        matchup = matchup_font.render(
-            f"{self.agent0_name} (Blue)  vs  {self.agent1_name} (Red)", True, DARK_GRAY)
-        surface.blit(matchup, matchup.get_rect(centerx=WINDOW_WIDTH // 2, y=150))
+        pygame.draw.line(surface, GRAY, (140, 110), (580, 110), width=1)
 
-        # Divider
-        pygame.draw.line(surface, GRAY, (140, 200), (580, 200), width=1)
+        label_font = get_font(22, bold=True)
+        lbl0 = label_font.render("Robot 0 (Blue):", True, BLUE)
+        surface.blit(lbl0, (160, 135))
+        lbl1 = label_font.render("Robot 1 (Red):", True, RED)
+        surface.blit(lbl1, (160, 225))
+
+        pygame.draw.line(surface, GRAY, (140, 310), (580, 310), width=1)
 
         self.time_input.draw(surface)
         self.seed_input.draw(surface)
         self.steps_input.draw(surface)
-        self.batch_checkbox.draw(surface)
-
-        if self.batch_checkbox.is_checked():
-            self.num_games_input.draw(surface)
-            self.log_rate_input.draw(surface)
-            self.csv_checkbox.draw(surface)
-        else:
-            self.log_checkbox.draw(surface)
+        self.log_checkbox.draw(surface)
 
         self.back_btn.draw(surface)
-        self.play_btn.draw(surface)
+        self.start_btn.draw(surface)
+
+        # Draw expanded dropdown last (on top of everything)
+        if self.dropdown1.is_expanded():
+            self.dropdown0.draw(surface)
+            self.dropdown1.draw(surface)
+        elif self.dropdown0.is_expanded():
+            self.dropdown1.draw(surface)
+            self.dropdown0.draw(surface)
+        else:
+            self.dropdown0.draw(surface)
+            self.dropdown1.draw(surface)
 
     def get_config(self):
         seed_val = int(self.seed_input.get_value())
-
-        config = {
-            "agent0": self.agent0_name,
-            "agent1": self.agent1_name,
+        return {
+            "agent0": self.dropdown0.selected,
+            "agent1": self.dropdown1.selected,
             "time_limit": self.time_input.get_value(),
+            "seed": seed_val if seed_val != 0 else random.randint(0, 255),
             "count_steps": int(self.steps_input.get_value()),
+            "logging_enabled": self.log_checkbox.is_checked(),
         }
 
-        if self.batch_checkbox.is_checked():
-            config["batch_mode"] = True
-            config["seed_start"] = seed_val if seed_val != 0 else None
-            config["num_games"] = int(self.num_games_input.get_value())
-            config["log_sampling_rate"] = int(self.log_rate_input.get_value())
-            config["csv"] = self.csv_checkbox.is_checked()
-            config["output_dir"] = "batch_results"
-            config["fail_fast"] = False
-            config["seed_list_file"] = None
-        else:
-            config["seed"] = seed_val if seed_val != 0 else random.randint(0, 255)
-            config["logging_enabled"] = self.log_checkbox.is_checked()
 
-        return config
+class BatchSetupScreen:
+    def __init__(self):
+        self.dropdown0 = Dropdown(160, 165, 400, 40, AGENT_NAMES, default_index=0)
+        self.dropdown1 = Dropdown(160, 255, 400, 40, AGENT_NAMES, default_index=1)
+
+        self.time_input = NumberInput(160, 340, "Time Limit (s):", 1.0, 0.1, 30.0, step=0.5, is_float=True)
+        self.steps_input = NumberInput(160, 400, "Max Rounds:", 4761, 10, 99999, step=100)
+
+        self.num_games_input = NumberInput(160, 480, "Num Games:", 100, 1, 10000, step=10)
+        self.log_rate_input = NumberInput(160, 540, "Log Sample Rate:", 0, 0, 1000, step=1)
+        self.csv_checkbox = Checkbox(160, 600, "Save CSV Output")
+
+        self.back_btn = Button(160, 670, 140, 45, "Back", font_size=20)
+        self.start_btn = Button(420, 670, 140, 45, "Start", color=GREEN,
+                                hover_color=(50, 160, 50), text_color=WHITE, font_size=22)
+
+    def handle_event(self, event):
+        # Handle expanded dropdowns first to capture clicks
+        if self.dropdown0.is_expanded():
+            self.dropdown0.handle_event(event)
+            return None
+        if self.dropdown1.is_expanded():
+            self.dropdown1.handle_event(event)
+            return None
+
+        self.dropdown0.handle_event(event)
+        self.dropdown1.handle_event(event)
+
+        self.time_input.handle_event(event)
+        self.steps_input.handle_event(event)
+        self.num_games_input.handle_event(event)
+        self.log_rate_input.handle_event(event)
+        self.csv_checkbox.handle_event(event)
+
+        if self.back_btn.handle_event(event):
+            return "back"
+        if self.start_btn.handle_event(event):
+            return "start"
+        return None
+
+    def draw(self, surface):
+        title_font = get_font(28, bold=True)
+        title = title_font.render("Batch Check Setup", True, BLACK)
+        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=60))
+
+        pygame.draw.line(surface, GRAY, (140, 110), (580, 110), width=1)
+
+        label_font = get_font(22, bold=True)
+        lbl0 = label_font.render("Robot 0 (Blue):", True, BLUE)
+        surface.blit(lbl0, (160, 135))
+        lbl1 = label_font.render("Robot 1 (Red):", True, RED)
+        surface.blit(lbl1, (160, 225))
+
+        pygame.draw.line(surface, GRAY, (140, 310), (580, 310), width=1)
+
+        self.time_input.draw(surface)
+        self.steps_input.draw(surface)
+
+        pygame.draw.line(surface, GRAY, (140, 455), (580, 455), width=1)
+
+        self.num_games_input.draw(surface)
+        self.log_rate_input.draw(surface)
+        self.csv_checkbox.draw(surface)
+
+        self.back_btn.draw(surface)
+        self.start_btn.draw(surface)
+
+        # Draw expanded dropdown last (on top of everything)
+        if self.dropdown1.is_expanded():
+            self.dropdown0.draw(surface)
+            self.dropdown1.draw(surface)
+        elif self.dropdown0.is_expanded():
+            self.dropdown1.draw(surface)
+            self.dropdown0.draw(surface)
+        else:
+            self.dropdown0.draw(surface)
+            self.dropdown1.draw(surface)
+
+    def get_config(self):
+        return {
+            "agent0": self.dropdown0.selected,
+            "agent1": self.dropdown1.selected,
+            "time_limit": self.time_input.get_value(),
+            "count_steps": int(self.steps_input.get_value()),
+            "batch_mode": True,
+            "seed_start": None,
+            "num_games": int(self.num_games_input.get_value()),
+            "log_sampling_rate": int(self.log_rate_input.get_value()),
+            "csv": self.csv_checkbox.is_checked(),
+            "output_dir": "batch_results",
+            "fail_fast": False,
+            "seed_list_file": None,
+        }
 
 
 # =============================================================================
@@ -1552,13 +1579,14 @@ class GameRunner:
         self.clock = pygame.time.Clock()
         self.running = True
 
-        self.setup_screen = SetupScreen()
-        self.settings_screen = None
+        self.opening_screen = OpeningScreen()
+        self.single_setup_screen = None
+        self.batch_setup_screen = None
         self.game_screen = None
         self.batch_screen = None
         self.file_select_screen = None
         self.replay_screen = None
-        self.current_screen = "setup"
+        self.current_screen = "opening"
 
     def run(self):
         while self.running:
@@ -1576,49 +1604,58 @@ class GameRunner:
         pygame.quit()
 
     def _handle_event(self, event):
-        if self.current_screen == "setup":
-            result = self.setup_screen.handle_event(event)
-            if result == "start":
-                self.settings_screen = SettingsScreen(
-                    self.setup_screen.get_agent0(),
-                    self.setup_screen.get_agent1(),
-                )
-                self.current_screen = "settings"
+        if self.current_screen == "opening":
+            result = self.opening_screen.handle_event(event)
+            if result == "single":
+                self.single_setup_screen = SingleGameSetupScreen()
+                self.current_screen = "single_setup"
+            elif result == "batch":
+                self.batch_setup_screen = BatchSetupScreen()
+                self.current_screen = "batch_setup"
             elif result == "replay":
                 self.file_select_screen = FileSelectScreen()
                 self.current_screen = "file_select"
 
-        elif self.current_screen == "settings":
-            result = self.settings_screen.handle_event(event)
-            if result == "play":
-                config = self.settings_screen.get_config()
+        elif self.current_screen == "single_setup":
+            result = self.single_setup_screen.handle_event(event)
+            if result == "start":
+                config = self.single_setup_screen.get_config()
                 self.game_screen = GameScreen(config)
                 self.current_screen = "game"
-            elif result == "run_batch":
-                config = self.settings_screen.get_config()
+                self.single_setup_screen = None
+            elif result == "back":
+                self.current_screen = "opening"
+                self.single_setup_screen = None
+
+        elif self.current_screen == "batch_setup":
+            result = self.batch_setup_screen.handle_event(event)
+            if result == "start":
+                config = self.batch_setup_screen.get_config()
                 self.batch_screen = BatchScreen(config)
                 self.current_screen = "batch"
+                self.batch_setup_screen = None
             elif result == "back":
-                self.current_screen = "setup"
+                self.current_screen = "opening"
+                self.batch_setup_screen = None
 
         elif self.current_screen == "game":
             result = self.game_screen.handle_event(event)
             if result == "new_game":
-                self.setup_screen = SetupScreen()
-                self.current_screen = "setup"
+                self.opening_screen = OpeningScreen()
+                self.current_screen = "opening"
                 self.game_screen = None
 
         elif self.current_screen == "batch":
             result = self.batch_screen.handle_event(event)
             if result == "new_game":
-                self.setup_screen = SetupScreen()
-                self.current_screen = "setup"
+                self.opening_screen = OpeningScreen()
+                self.current_screen = "opening"
                 self.batch_screen = None
 
         elif self.current_screen == "file_select":
             result = self.file_select_screen.handle_event(event)
             if result == "back":
-                self.current_screen = "setup"
+                self.current_screen = "opening"
                 self.file_select_screen = None
             elif isinstance(result, tuple) and result[0] == "load":
                 filepath = result[1]
@@ -1635,8 +1672,8 @@ class GameRunner:
         elif self.current_screen == "replay":
             result = self.replay_screen.handle_event(event)
             if result == "back_to_menu":
-                self.setup_screen = SetupScreen()
-                self.current_screen = "setup"
+                self.opening_screen = OpeningScreen()
+                self.current_screen = "opening"
                 self.replay_screen = None
 
     def _update(self):
@@ -1649,10 +1686,12 @@ class GameRunner:
 
     def _draw(self):
         self.screen.fill(PANEL_BG)
-        if self.current_screen == "setup":
-            self.setup_screen.draw(self.screen)
-        elif self.current_screen == "settings":
-            self.settings_screen.draw(self.screen)
+        if self.current_screen == "opening":
+            self.opening_screen.draw(self.screen)
+        elif self.current_screen == "single_setup":
+            self.single_setup_screen.draw(self.screen)
+        elif self.current_screen == "batch_setup":
+            self.batch_setup_screen.draw(self.screen)
         elif self.current_screen == "game":
             self.game_screen.draw(self.screen)
         elif self.current_screen == "batch":
