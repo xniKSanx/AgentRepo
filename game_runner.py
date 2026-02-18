@@ -422,6 +422,167 @@ def render_board(surface, env, icons):
 
 
 # =============================================================================
+#                           File Select Screen
+# =============================================================================
+
+
+class FileSelectScreen:
+    """Screen for browsing and selecting log files to replay."""
+
+    MAX_VISIBLE = 14
+    LIST_X = 60
+    LIST_Y = 100
+    LIST_W = 600
+    ROW_H = 34
+
+    def __init__(self):
+        self.files = []          # list of (filename, full_path, mod_time_str)
+        self.selected_index = -1
+        self.scroll_offset = 0
+        self.error_msg = ""
+
+        self.load_btn = Button(480, 600, 120, 45, "Load", color=GREEN,
+                               hover_color=(50, 160, 50), text_color=WHITE, font_size=20)
+        self.back_btn = Button(60, 600, 120, 45, "Back", color=RED,
+                               hover_color=(190, 50, 50), text_color=WHITE, font_size=20)
+        self._scan_directory()
+
+    def _scan_directory(self):
+        self.files = []
+        self.selected_index = -1
+        self.scroll_offset = 0
+
+        search_dirs = ["game_logs"]
+        # Also check for batch result directories
+        if os.path.isdir("batch_results"):
+            for entry in os.listdir("batch_results"):
+                sub_logs = os.path.join("batch_results", entry, "game_logs")
+                if os.path.isdir(sub_logs):
+                    search_dirs.append(sub_logs)
+            # batch_results might have game_logs directly
+            direct = os.path.join("batch_results", "game_logs")
+            if os.path.isdir(direct):
+                search_dirs.append(direct)
+
+        for dir_path in search_dirs:
+            if not os.path.isdir(dir_path):
+                continue
+            for fname in os.listdir(dir_path):
+                if fname.endswith(".txt"):
+                    full_path = os.path.join(dir_path, fname)
+                    try:
+                        mtime = os.path.getmtime(full_path)
+                        from datetime import datetime as dt
+                        mod_str = dt.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+                    except OSError:
+                        mod_str = ""
+                        mtime = 0
+                    self.files.append((fname, full_path, mod_str, mtime))
+
+        # Sort newest first
+        self.files.sort(key=lambda x: x[3], reverse=True)
+
+    def show_error(self, msg):
+        self.error_msg = msg
+
+    def handle_event(self, event):
+        self.error_msg = ""
+
+        if self.back_btn.handle_event(event):
+            return "back"
+
+        if self.selected_index >= 0 and self.load_btn.handle_event(event):
+            filepath = self.files[self.selected_index][1]
+            return ("load", filepath)
+
+        # Mouse wheel scrolling
+        if event.type == pygame.MOUSEWHEEL:
+            self.scroll_offset = max(0, min(
+                self.scroll_offset - event.y,
+                max(0, len(self.files) - self.MAX_VISIBLE)
+            ))
+
+        # Click on file list
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mx, my = event.pos
+            if self.LIST_X <= mx <= self.LIST_X + self.LIST_W:
+                rel_y = my - self.LIST_Y
+                if 0 <= rel_y < self.MAX_VISIBLE * self.ROW_H:
+                    row = rel_y // self.ROW_H + self.scroll_offset
+                    if 0 <= row < len(self.files):
+                        self.selected_index = row
+
+        return None
+
+    def draw(self, surface):
+        # Title
+        title_font = get_font(28, bold=True)
+        title = title_font.render("Select Replay Log", True, BLACK)
+        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=30))
+
+        # Subtitle
+        sub_font = get_font(15)
+        count_text = f"{len(self.files)} log file(s) found"
+        sub = sub_font.render(count_text, True, DARK_GRAY)
+        surface.blit(sub, sub.get_rect(centerx=WINDOW_WIDTH // 2, y=70))
+
+        # File list
+        font = get_font(15)
+        date_font = get_font(13)
+
+        if not self.files:
+            msg_font = get_font(18)
+            msg = msg_font.render("No log files found in game_logs/", True, DARK_GRAY)
+            surface.blit(msg, msg.get_rect(centerx=WINDOW_WIDTH // 2, y=250))
+        else:
+            visible_end = min(self.scroll_offset + self.MAX_VISIBLE, len(self.files))
+            for i in range(self.scroll_offset, visible_end):
+                row_idx = i - self.scroll_offset
+                y = self.LIST_Y + row_idx * self.ROW_H
+                row_rect = pygame.Rect(self.LIST_X, y, self.LIST_W, self.ROW_H - 2)
+
+                # Background
+                if i == self.selected_index:
+                    pygame.draw.rect(surface, (180, 210, 255), row_rect, border_radius=4)
+                else:
+                    pygame.draw.rect(surface, WHITE, row_rect, border_radius=4)
+                pygame.draw.rect(surface, GRAY, row_rect, width=1, border_radius=4)
+
+                # Filename
+                fname = self.files[i][0]
+                if len(fname) > 55:
+                    fname = fname[:52] + "..."
+                text = font.render(fname, True, BLACK)
+                surface.blit(text, (self.LIST_X + 8, y + 4))
+
+                # Date
+                date_text = date_font.render(self.files[i][2], True, DARK_GRAY)
+                surface.blit(date_text, (self.LIST_X + self.LIST_W - 120, y + 7))
+
+            # Scroll indicators
+            if self.scroll_offset > 0:
+                indicator = font.render("^ more above ^", True, DARK_GRAY)
+                surface.blit(indicator, indicator.get_rect(
+                    centerx=WINDOW_WIDTH // 2, y=self.LIST_Y - 18))
+            if visible_end < len(self.files):
+                indicator = font.render("v more below v", True, DARK_GRAY)
+                surface.blit(indicator, indicator.get_rect(
+                    centerx=WINDOW_WIDTH // 2,
+                    y=self.LIST_Y + self.MAX_VISIBLE * self.ROW_H + 2))
+
+        # Buttons
+        self.back_btn.draw(surface)
+        if self.selected_index >= 0:
+            self.load_btn.draw(surface)
+
+        # Error message
+        if self.error_msg:
+            err_font = get_font(15)
+            err = err_font.render(f"Error: {self.error_msg}", True, RED)
+            surface.blit(err, err.get_rect(centerx=WINDOW_WIDTH // 2, y=660))
+
+
+# =============================================================================
 #                              Agent Helpers
 # =============================================================================
 
@@ -449,6 +610,8 @@ class SetupScreen:
         self.dropdown1 = Dropdown(220, 370, 280, 40, AGENT_NAMES, default_index=1)
         self.start_btn = Button(260, 480, 200, 50, "Start Game", color=GREEN,
                                 hover_color=(50, 160, 50), text_color=WHITE, font_size=22)
+        self.replay_btn = Button(260, 550, 200, 50, "Replay Log", color=BLUE,
+                                 hover_color=(50, 110, 210), text_color=WHITE, font_size=22)
 
     def handle_event(self, event):
         # Handle dropdowns (expanded one first to capture clicks)
@@ -464,6 +627,8 @@ class SetupScreen:
 
         if self.start_btn.handle_event(event):
             return "start"
+        if self.replay_btn.handle_event(event):
+            return "replay"
         return None
 
     def draw(self, surface):
@@ -488,15 +653,18 @@ class SetupScreen:
         if self.dropdown1.is_expanded():
             self.dropdown0.draw(surface)
             self.start_btn.draw(surface)
+            self.replay_btn.draw(surface)
             self.dropdown1.draw(surface)
         elif self.dropdown0.is_expanded():
             self.dropdown1.draw(surface)
             self.start_btn.draw(surface)
+            self.replay_btn.draw(surface)
             self.dropdown0.draw(surface)
         else:
             self.dropdown0.draw(surface)
             self.dropdown1.draw(surface)
             self.start_btn.draw(surface)
+            self.replay_btn.draw(surface)
 
     def get_agent0(self):
         return self.dropdown0.selected
@@ -1213,6 +1381,165 @@ class BatchScreen:
 
 
 # =============================================================================
+#                              Replay Screen
+# =============================================================================
+
+
+class ReplayScreen:
+    """Visual replay of a recorded game with VCR-style controls."""
+
+    SPEED_OPTIONS = [1, 2, 4, 8]
+    SPEED_DELAYS = {1: 500, 2: 250, 4: 125, 8: 60}  # ms per move
+
+    def __init__(self, engine, filepath):
+        from log_replay import ReplayEngine
+        self.engine = engine
+        self.filepath = filepath
+        self.icons = load_icons()
+
+        # Auto-play state
+        self.playing = False
+        self.speed_index = 0
+        self.last_step_time = 0
+
+        # Control buttons
+        btn_y = 728
+        self.start_btn = Button(30, btn_y, 55, 40, "|<", font_size=18)
+        self.back_step_btn = Button(90, btn_y, 55, 40, "<", font_size=20)
+        self.fwd_step_btn = Button(150, btn_y, 55, 40, ">", font_size=20)
+        self.end_btn = Button(210, btn_y, 55, 40, ">|", font_size=18)
+        self.play_btn = Button(280, btn_y, 90, 40, "Play", color=GREEN,
+                               hover_color=(50, 160, 50), text_color=WHITE, font_size=18)
+        self.speed_btn = Button(380, btn_y, 70, 40, "1x", font_size=18)
+        self.menu_btn = Button(580, btn_y, 110, 40, "Menu", color=RED,
+                               hover_color=(190, 50, 50), text_color=WHITE, font_size=18)
+
+        # Progress bar
+        self.progress_rect = pygame.Rect(60, 785, 600, 20)
+
+    def handle_event(self, event):
+        if self.start_btn.handle_event(event):
+            self.engine.go_to_start()
+            self.playing = False
+        elif self.back_step_btn.handle_event(event):
+            self.engine.step_backward()
+            self.playing = False
+        elif self.fwd_step_btn.handle_event(event):
+            self.engine.step_forward()
+        elif self.end_btn.handle_event(event):
+            self.engine.go_to_end()
+            self.playing = False
+        elif self.play_btn.handle_event(event):
+            if self.engine.is_at_end():
+                self.engine.go_to_start()
+            self.playing = not self.playing
+            self.last_step_time = pygame.time.get_ticks()
+        elif self.speed_btn.handle_event(event):
+            self.speed_index = (self.speed_index + 1) % len(self.SPEED_OPTIONS)
+        elif self.menu_btn.handle_event(event):
+            return "back_to_menu"
+
+        # Progress bar click
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.progress_rect.collidepoint(event.pos):
+                total = self.engine.total_moves
+                if total > 0:
+                    fraction = (event.pos[0] - self.progress_rect.x) / self.progress_rect.width
+                    target = int(fraction * total)
+                    self.engine.go_to_index(target)
+                    self.playing = False
+
+        return None
+
+    def update(self):
+        if self.playing:
+            now = pygame.time.get_ticks()
+            delay = self.SPEED_DELAYS[self.SPEED_OPTIONS[self.speed_index]]
+            if now - self.last_step_time >= delay:
+                if not self.engine.step_forward():
+                    self.playing = False
+                self.last_step_time = now
+
+    def draw(self, surface):
+        # Title
+        title_font = get_font(26, bold=True)
+        title = title_font.render("AI Warehouse - Replay", True, BLACK)
+        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=10))
+
+        # Subtitle with agent names
+        sub_font = get_font(16)
+        names = self.engine.data.agent_names
+        sub = sub_font.render(f"{names[0]} (Blue) vs {names[1]} (Red)", True, DARK_GRAY)
+        surface.blit(sub, sub.get_rect(centerx=WINDOW_WIDTH // 2, y=42))
+
+        # Reuse existing board and robot data rendering
+        render_robot_data(surface, self.engine.current_env, self.icons)
+        render_board(surface, self.engine.current_env, self.icons)
+
+        # Turn info line
+        self._draw_turn_info(surface)
+
+        # Control buttons
+        self._update_button_labels()
+        for btn in [self.start_btn, self.back_step_btn, self.fwd_step_btn,
+                     self.end_btn, self.play_btn, self.speed_btn, self.menu_btn]:
+            btn.draw(surface)
+
+        # Progress bar
+        self._draw_progress_bar(surface)
+
+        # Status line
+        self._draw_status(surface)
+
+    def _update_button_labels(self):
+        self.play_btn.text = "Pause" if self.playing else "Play"
+        self.speed_btn.text = f"{self.SPEED_OPTIONS[self.speed_index]}x"
+
+    def _draw_turn_info(self, surface):
+        font = get_font(16)
+        idx = self.engine.current_index
+        total = self.engine.total_moves
+        round_num = self.engine.current_round
+
+        parts = [f"Move: {idx}/{total}", f"Round: {round_num}"]
+        move_info = self.engine.current_move_info
+        if move_info:
+            agent_idx, op = move_info
+            agent_name = self.engine.data.agent_names[agent_idx]
+            parts.append(f"Agent {agent_idx} ({agent_name}): {op}")
+        else:
+            parts.append("Initial State")
+
+        text = "  |  ".join(parts)
+        surface.blit(font.render(text, True, BLACK), (15, 700))
+
+    def _draw_progress_bar(self, surface):
+        # Background
+        pygame.draw.rect(surface, LIGHT_GRAY, self.progress_rect, border_radius=4)
+        pygame.draw.rect(surface, DARK_GRAY, self.progress_rect, width=1, border_radius=4)
+
+        # Filled portion
+        total = self.engine.total_moves
+        if total > 0:
+            fill_w = int(self.progress_rect.width * self.engine.current_index / total)
+            if fill_w > 0:
+                fill_rect = pygame.Rect(self.progress_rect.x, self.progress_rect.y,
+                                        fill_w, self.progress_rect.height)
+                pygame.draw.rect(surface, BLUE, fill_rect, border_radius=4)
+
+        # Position text
+        font = get_font(13)
+        label = font.render(f"{self.engine.current_index}/{total}", True, BLACK)
+        surface.blit(label, label.get_rect(center=self.progress_rect.center))
+
+    def _draw_status(self, surface):
+        font = get_font(14)
+        filename = os.path.basename(self.filepath)
+        text = font.render(f"Replaying: {filename}", True, DARK_GRAY)
+        surface.blit(text, (15, 815))
+
+
+# =============================================================================
 #                            Game Runner (App Controller)
 # =============================================================================
 
@@ -1229,6 +1556,8 @@ class GameRunner:
         self.settings_screen = None
         self.game_screen = None
         self.batch_screen = None
+        self.file_select_screen = None
+        self.replay_screen = None
         self.current_screen = "setup"
 
     def run(self):
@@ -1255,6 +1584,9 @@ class GameRunner:
                     self.setup_screen.get_agent1(),
                 )
                 self.current_screen = "settings"
+            elif result == "replay":
+                self.file_select_screen = FileSelectScreen()
+                self.current_screen = "file_select"
 
         elif self.current_screen == "settings":
             result = self.settings_screen.handle_event(event)
@@ -1283,11 +1615,37 @@ class GameRunner:
                 self.current_screen = "setup"
                 self.batch_screen = None
 
+        elif self.current_screen == "file_select":
+            result = self.file_select_screen.handle_event(event)
+            if result == "back":
+                self.current_screen = "setup"
+                self.file_select_screen = None
+            elif isinstance(result, tuple) and result[0] == "load":
+                filepath = result[1]
+                try:
+                    from log_replay import LogParser, ReplayEngine
+                    replay_data = LogParser.parse(filepath)
+                    engine = ReplayEngine(replay_data)
+                    self.replay_screen = ReplayScreen(engine, filepath)
+                    self.current_screen = "replay"
+                    self.file_select_screen = None
+                except Exception as e:
+                    self.file_select_screen.show_error(str(e))
+
+        elif self.current_screen == "replay":
+            result = self.replay_screen.handle_event(event)
+            if result == "back_to_menu":
+                self.setup_screen = SetupScreen()
+                self.current_screen = "setup"
+                self.replay_screen = None
+
     def _update(self):
         if self.current_screen == "game" and self.game_screen:
             self.game_screen.update()
         elif self.current_screen == "batch" and self.batch_screen:
             self.batch_screen.update()
+        elif self.current_screen == "replay" and self.replay_screen:
+            self.replay_screen.update()
 
     def _draw(self):
         self.screen.fill(PANEL_BG)
@@ -1299,6 +1657,10 @@ class GameRunner:
             self.game_screen.draw(self.screen)
         elif self.current_screen == "batch":
             self.batch_screen.draw(self.screen)
+        elif self.current_screen == "file_select":
+            self.file_select_screen.draw(self.screen)
+        elif self.current_screen == "replay":
+            self.replay_screen.draw(self.screen)
         pygame.display.flip()
 
 
