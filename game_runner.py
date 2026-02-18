@@ -2,7 +2,9 @@ import pygame
 import threading
 import time
 import random
+import os
 from enum import Enum
+from datetime import datetime
 
 from WarehouseEnv import WarehouseEnv, manhattan_distance, board_size
 import Agent
@@ -223,6 +225,42 @@ class NumberInput:
 
     def get_value(self):
         return self.value
+
+
+class Checkbox:
+    def __init__(self, x, y, label, checked=False):
+        self.x = x
+        self.y = y
+        self.label = label
+        self.checked = checked
+        self.box_size = 24
+        self.box_rect = pygame.Rect(x, y + 4, self.box_size, self.box_size)
+
+    def draw(self, surface):
+        pygame.draw.rect(surface, WHITE, self.box_rect, border_radius=4)
+        pygame.draw.rect(surface, BLACK, self.box_rect, width=2, border_radius=4)
+
+        if self.checked:
+            bx, by = self.box_rect.x, self.box_rect.y
+            bs = self.box_size
+            pygame.draw.line(surface, GREEN, (bx + 4, by + bs // 2),
+                             (bx + bs // 3, by + bs - 6), width=3)
+            pygame.draw.line(surface, GREEN, (bx + bs // 3, by + bs - 6),
+                             (bx + bs - 4, by + 4), width=3)
+
+        font = get_font(22)
+        label_surf = font.render(self.label, True, BLACK)
+        surface.blit(label_surf, (self.x + self.box_size + 10, self.y + 4))
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.box_rect.collidepoint(event.pos):
+                self.checked = not self.checked
+                return True
+        return False
+
+    def is_checked(self):
+        return self.checked
 
 
 # =============================================================================
@@ -475,6 +513,8 @@ class SettingsScreen:
         self.seed_input = NumberInput(160, 330, "Seed (0=random):", 0, 0, 9999, step=1)
         self.steps_input = NumberInput(160, 400, "Max Rounds:", 4761, 10, 99999, step=100)
 
+        self.log_checkbox = Checkbox(160, 450, "Enable Game Logging")
+
         self.back_btn = Button(160, 500, 140, 45, "Back", font_size=20)
         self.play_btn = Button(420, 500, 140, 45, "Play", color=GREEN,
                                hover_color=(50, 160, 50), text_color=WHITE, font_size=22)
@@ -483,6 +523,7 @@ class SettingsScreen:
         self.time_input.handle_event(event)
         self.seed_input.handle_event(event)
         self.steps_input.handle_event(event)
+        self.log_checkbox.handle_event(event)
 
         if self.back_btn.handle_event(event):
             return "back"
@@ -506,6 +547,7 @@ class SettingsScreen:
         self.time_input.draw(surface)
         self.seed_input.draw(surface)
         self.steps_input.draw(surface)
+        self.log_checkbox.draw(surface)
 
         self.back_btn.draw(surface)
         self.play_btn.draw(surface)
@@ -520,6 +562,7 @@ class SettingsScreen:
             "time_limit": self.time_input.get_value(),
             "seed": seed_val,
             "count_steps": int(self.steps_input.get_value()),
+            "logging_enabled": self.log_checkbox.is_checked(),
         }
 
 
@@ -579,6 +622,78 @@ class GameState(Enum):
 
 
 # =============================================================================
+#                              Game Logger
+# =============================================================================
+
+
+class GameLogger:
+    def __init__(self, config):
+        self.entries = []
+        self.config = config
+        self._log_header()
+
+    def _log_header(self):
+        self.entries.append("=" * 60)
+        self.entries.append("AI WAREHOUSE GAME LOG")
+        self.entries.append("=" * 60)
+        self.entries.append(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.entries.append(f"Agent 0 (Blue): {self.config['agent0']}")
+        self.entries.append(f"Agent 1 (Red):  {self.config['agent1']}")
+        self.entries.append(f"Time Limit:     {self.config['time_limit']}s")
+        self.entries.append(f"Seed:           {self.config['seed']}")
+        self.entries.append(f"Max Rounds:     {self.config['count_steps']}")
+        self.entries.append("=" * 60)
+        self.entries.append("")
+
+    def log_initial_state(self, env):
+        self.entries.append("--- INITIAL STATE ---")
+        for i, robot in enumerate(env.robots):
+            self.entries.append(f"  Robot {i}: position={robot.position}, "
+                                f"battery={robot.battery}, credit={robot.credit}")
+        for i, pkg in enumerate(env.packages[:2]):
+            self.entries.append(f"  Package {i}: position={pkg.position}, "
+                                f"destination={pkg.destination}, on_board={pkg.on_board}")
+        for i, cs in enumerate(env.charge_stations):
+            self.entries.append(f"  Charge Station {i}: position={cs.position}")
+        self.entries.append("")
+
+    def log_move(self, round_num, agent_index, agent_name, operator, env):
+        self.entries.append(f"[Round {round_num}] Agent {agent_index} ({agent_name}): {operator}")
+        for i, robot in enumerate(env.robots):
+            pkg_info = ""
+            if robot.package is not None:
+                pkg_info = (f", carrying=({robot.package.position}"
+                            f"->{robot.package.destination})")
+            self.entries.append(f"  Robot {i}: pos={robot.position}, "
+                                f"bat={robot.battery}, cred={robot.credit}{pkg_info}")
+
+    def log_error(self, round_num, agent_index, agent_name, error):
+        self.entries.append(f"[Round {round_num}] Agent {agent_index} ({agent_name}): "
+                            f"ERROR - {error}")
+
+    def log_result(self, result_text, balances):
+        self.entries.append("")
+        self.entries.append("=" * 60)
+        self.entries.append("GAME RESULT")
+        self.entries.append("=" * 60)
+        self.entries.append(f"Final Balances: Agent 0 = {balances[0]}, Agent 1 = {balances[1]}")
+        self.entries.append(f"Result: {result_text}")
+        self.entries.append("=" * 60)
+
+    def save(self, directory="game_logs"):
+        os.makedirs(directory, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        agent0 = self.config["agent0"]
+        agent1 = self.config["agent1"]
+        seed = self.config["seed"]
+        filename = f"game_{agent0}_vs_{agent1}_seed{seed}_{timestamp}.txt"
+        filepath = os.path.join(directory, filename)
+        with open(filepath, "w") as f:
+            f.write("\n".join(self.entries) + "\n")
+        return filepath
+
+
+# =============================================================================
 #                              Game Screen
 # =============================================================================
 
@@ -589,10 +704,17 @@ class GameScreen:
         self.time_limit = config["time_limit"]
         self.seed = config["seed"]
         self.count_steps = config["count_steps"]
+        self.logging_enabled = config.get("logging_enabled", False)
+        self.logger = None
 
         # Initialize environment
         self.env = WarehouseEnv()
         self.env.generate(self.seed, 2 * self.count_steps)
+
+        # Initialize logger
+        if self.logging_enabled:
+            self.logger = GameLogger(config)
+            self.logger.log_initial_state(self.env)
 
         # Initialize agents
         self.agents = create_agents()
@@ -675,6 +797,13 @@ class GameScreen:
             if self.worker.is_done():
                 if self.worker.get_error():
                     self.status_text = f"Agent error: {self.worker.get_error()}"
+                    if self.logger:
+                        self.logger.log_error(
+                            self.current_round,
+                            self.current_agent_index,
+                            self.agent_names[self.current_agent_index],
+                            self.worker.get_error(),
+                        )
                     self.game_state = GameState.WAITING_FOR_INPUT
                 else:
                     op = self.worker.get_result()
@@ -706,6 +835,14 @@ class GameScreen:
 
     def _apply_move(self, operator):
         self.env.apply_operator(self.current_agent_index, operator)
+        if self.logger:
+            self.logger.log_move(
+                self.current_round,
+                self.current_agent_index,
+                self.agent_names[self.current_agent_index],
+                operator,
+                self.env,
+            )
         self.last_operator = operator
         self.last_agent_index = self.current_agent_index
 
@@ -744,6 +881,13 @@ class GameScreen:
             self.result_text = (f"Robot 1 - {self.agent_names[1]} (Red) wins!  "
                                 f"({balances[0]} vs {balances[1]})")
         self.status_text = "Game Over"
+        if self.logger:
+            self.logger.log_result(self.result_text, balances)
+            try:
+                saved_path = self.logger.save()
+                self.status_text = f"Game Over - Log saved to {saved_path}"
+            except OSError as e:
+                self.status_text = f"Game Over - Failed to save log: {e}"
 
     def draw(self, surface):
         # Title
