@@ -61,6 +61,24 @@ class WarehouseEnv(object):
 
         self.charge_stations = [ChargeStation(p) for p in self.random_cells(2)]
 
+    def load_from_map_data(self, data, num_steps):
+        self.num_steps = num_steps
+        self.seed = random.randint(0, 255)
+        self.robots = [
+            Robot(tuple(r["position"]), r.get("battery", 20), r.get("credit", 0))
+            for r in data["robots"]
+        ]
+        self.packages = [
+            Package(tuple(p["position"]), tuple(p["destination"]))
+            for p in data["packages"]
+        ]
+        for pkg in self.packages:
+            pkg.on_board = True
+        self.charge_stations = [
+            ChargeStation(tuple(cs["position"]))
+            for cs in data["charge_stations"]
+        ]
+
     def clone(self):
         cloned = WarehouseEnv()
         cloned.num_steps = self.num_steps
