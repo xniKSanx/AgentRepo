@@ -638,18 +638,38 @@ class OpeningScreen:
 
 class SingleGameSetupScreen:
     def __init__(self):
-        self.dropdown0 = Dropdown(160, 165, 400, 40, AGENT_NAMES, default_index=0)
-        self.dropdown1 = Dropdown(160, 255, 400, 40, AGENT_NAMES, default_index=1)
+        # Map mode toggle
+        self.map_mode = "random"  # "random" or "custom"
+        self.custom_map_data = None
+        self.random_map_btn = Button(160, 110, 190, 38, "Random Map", color=GREEN,
+                                     hover_color=(50, 160, 50), text_color=WHITE, font_size=18)
+        self.custom_map_btn = Button(370, 110, 190, 38, "Build Custom Map",
+                                     hover_color=HOVER_GRAY, font_size=18)
 
-        self.time_input = NumberInput(160, 340, "Time Limit (s):", 1.0, 0.1, 30.0, step=0.5, is_float=True)
-        self.seed_input = NumberInput(160, 400, "Seed (0=random):", 0, 0, 9999, step=1)
-        self.steps_input = NumberInput(160, 460, "Max Rounds:", 4761, 10, 99999, step=100)
+        self.dropdown0 = Dropdown(160, 210, 400, 40, AGENT_NAMES, default_index=0)
+        self.dropdown1 = Dropdown(160, 300, 400, 40, AGENT_NAMES, default_index=1)
 
-        self.log_checkbox = Checkbox(160, 530, "Enable Game Logging")
+        self.time_input = NumberInput(160, 390, "Time Limit (s):", 1.0, 0.1, 30.0, step=0.5, is_float=True)
+        self.seed_input = NumberInput(160, 450, "Seed (0=random):", 0, 0, 9999, step=1)
+        self.steps_input = NumberInput(160, 510, "Max Rounds:", 4761, 10, 99999, step=100)
 
-        self.back_btn = Button(160, 610, 140, 45, "Back", font_size=20)
-        self.start_btn = Button(420, 610, 140, 45, "Start", color=GREEN,
+        self.log_checkbox = Checkbox(160, 580, "Enable Game Logging")
+
+        self.back_btn = Button(160, 680, 140, 45, "Back", font_size=20)
+        self.start_btn = Button(420, 680, 140, 45, "Start", color=GREEN,
                                 hover_color=(50, 160, 50), text_color=WHITE, font_size=22)
+
+    def _update_toggle_colors(self):
+        if self.map_mode == "random":
+            self.random_map_btn.color = GREEN
+            self.random_map_btn.text_color = WHITE
+            self.custom_map_btn.color = GRAY
+            self.custom_map_btn.text_color = BLACK
+        else:
+            self.random_map_btn.color = GRAY
+            self.random_map_btn.text_color = BLACK
+            self.custom_map_btn.color = GREEN
+            self.custom_map_btn.text_color = WHITE
 
     def handle_event(self, event):
         # Handle expanded dropdowns first to capture clicks
@@ -660,37 +680,69 @@ class SingleGameSetupScreen:
             self.dropdown1.handle_event(event)
             return None
 
+        # Map mode toggle
+        if self.random_map_btn.handle_event(event):
+            self.map_mode = "random"
+            self._update_toggle_colors()
+            return None
+        if self.custom_map_btn.handle_event(event):
+            self.map_mode = "custom"
+            self._update_toggle_colors()
+            return None
+
         self.dropdown0.handle_event(event)
         self.dropdown1.handle_event(event)
 
         self.time_input.handle_event(event)
-        self.seed_input.handle_event(event)
+        if self.map_mode == "random":
+            self.seed_input.handle_event(event)
         self.steps_input.handle_event(event)
         self.log_checkbox.handle_event(event)
 
         if self.back_btn.handle_event(event):
             return "back"
         if self.start_btn.handle_event(event):
+            if self.map_mode == "custom" and self.custom_map_data is None:
+                return "build_map"
             return "start"
         return None
 
     def draw(self, surface):
         title_font = get_font(28, bold=True)
         title = title_font.render("Single Game Setup", True, BLACK)
-        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=60))
+        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=30))
 
-        pygame.draw.line(surface, GRAY, (140, 110), (580, 110), width=1)
+        # Map mode section
+        map_label_font = get_font(18, bold=True)
+        map_label = map_label_font.render("Map Mode:", True, DARK_GRAY)
+        surface.blit(map_label, (160, 80))
+
+        self._update_toggle_colors()
+        self.random_map_btn.draw(surface)
+        self.custom_map_btn.draw(surface)
+
+        # Custom map status
+        if self.map_mode == "custom":
+            status_font = get_font(16)
+            if self.custom_map_data is not None:
+                status = status_font.render("Map Ready", True, GREEN)
+            else:
+                status = status_font.render("No map built yet - click Start to build", True, ORANGE)
+            surface.blit(status, (160, 152))
+
+        pygame.draw.line(surface, GRAY, (140, 170), (580, 170), width=1)
 
         label_font = get_font(22, bold=True)
         lbl0 = label_font.render("Robot 0 (Blue):", True, BLUE)
-        surface.blit(lbl0, (160, 135))
+        surface.blit(lbl0, (160, 180))
         lbl1 = label_font.render("Robot 1 (Red):", True, RED)
-        surface.blit(lbl1, (160, 225))
+        surface.blit(lbl1, (160, 270))
 
-        pygame.draw.line(surface, GRAY, (140, 310), (580, 310), width=1)
+        pygame.draw.line(surface, GRAY, (140, 360), (580, 360), width=1)
 
         self.time_input.draw(surface)
-        self.seed_input.draw(surface)
+        if self.map_mode == "random":
+            self.seed_input.draw(surface)
         self.steps_input.draw(surface)
         self.log_checkbox.draw(surface)
 
@@ -710,7 +762,7 @@ class SingleGameSetupScreen:
 
     def get_config(self):
         seed_val = int(self.seed_input.get_value())
-        return {
+        config = {
             "agent0": self.dropdown0.selected,
             "agent1": self.dropdown1.selected,
             "time_limit": self.time_input.get_value(),
@@ -718,6 +770,263 @@ class SingleGameSetupScreen:
             "count_steps": int(self.steps_input.get_value()),
             "logging_enabled": self.log_checkbox.is_checked(),
         }
+        if self.map_mode == "custom" and self.custom_map_data is not None:
+            config["custom_map_data"] = self.custom_map_data
+        return config
+
+
+# =============================================================================
+#                          Map Builder Screen
+# =============================================================================
+
+# Tool types for the palette
+MAP_TOOLS = [
+    ("robot_0", "R0 Blue", BLUE, "R0"),
+    ("robot_1", "R1 Red", RED, "R1"),
+    ("package_1", "Pkg1", YELLOW, "P1"),
+    ("package_1_dest", "Dest1", ORANGE, "D1"),
+    ("package_2", "Pkg2", YELLOW, "P2"),
+    ("package_2_dest", "Dest2", ORANGE, "D2"),
+    ("charge_1", "Chg1", GREEN, "C1"),
+    ("charge_2", "Chg2", GREEN, "C2"),
+    ("eraser", "Erase", LIGHT_GRAY, "X"),
+]
+
+# Map from tool id to icon key used by load_icons()
+TOOL_ICON_MAP = {
+    "robot_0": "blue_robot",
+    "robot_1": "red_robot",
+    "package_1": "package_1",
+    "package_1_dest": "dest_1",
+    "package_2": "package_2",
+    "package_2_dest": "dest_2",
+    "charge_1": "charge_station",
+    "charge_2": "charge_station",
+}
+
+
+class MapBuilderScreen:
+    # Grid geometry (matches game board)
+    GRID_X = 110
+    GRID_Y = 170
+    CELL_SIZE = 100
+
+    def __init__(self):
+        self.icons = load_icons()
+        self.selected_tool = None
+        self.placements = {}  # (x,y) -> tool_id string
+        self.hovered_cell = None
+        self.error_msg = ""
+
+        # Build palette buttons
+        self.palette_buttons = {}
+        bx = 10
+        for tool_id, label, color, _ in MAP_TOOLS:
+            btn_w = max(68, get_font(13).size(label)[0] + 14)
+            btn = Button(bx, 75, btn_w, 30, label, color=GRAY,
+                         hover_color=HOVER_GRAY, text_color=BLACK, font_size=13)
+            self.palette_buttons[tool_id] = btn
+            bx += btn_w + 4
+
+        # Action buttons
+        self.clear_btn = Button(30, 780, 120, 42, "Clear All", color=RED,
+                                hover_color=(190, 50, 50), text_color=WHITE, font_size=18)
+        self.back_btn = Button(260, 780, 120, 42, "Back", font_size=18)
+        self.save_btn = Button(490, 780, 120, 42, "Save", color=GREEN,
+                               hover_color=(50, 160, 50), text_color=WHITE, font_size=18)
+
+    def _cell_from_pos(self, pos):
+        """Convert pixel position to grid (x,y) or None if outside grid."""
+        px, py = pos
+        gx = (px - self.GRID_X) // self.CELL_SIZE
+        gy = (py - self.GRID_Y) // self.CELL_SIZE
+        if 0 <= gx < board_size and 0 <= gy < board_size:
+            # Verify within grid bounds (not just in surrounding area)
+            if (self.GRID_X <= px < self.GRID_X + board_size * self.CELL_SIZE and
+                    self.GRID_Y <= py < self.GRID_Y + board_size * self.CELL_SIZE):
+                return (gx, gy)
+        return None
+
+    def _find_placement(self, tool_id):
+        """Find the cell where a tool_id is currently placed, or None."""
+        for pos, tid in self.placements.items():
+            if tid == tool_id:
+                return pos
+        return None
+
+    def _validate(self):
+        """Check if all required items are placed. Returns error message or empty string."""
+        required = ["robot_0", "robot_1", "package_1", "package_1_dest",
+                     "package_2", "package_2_dest", "charge_1", "charge_2"]
+        placed = set(self.placements.values())
+        missing = [tid for tid in required if tid not in placed]
+        if missing:
+            labels = {tid: label for tid, label, _, _ in MAP_TOOLS}
+            names = ", ".join(labels[m] for m in missing)
+            return f"Missing: {names}"
+
+        # Check package != its own destination
+        for pkg_id, dest_id in [("package_1", "package_1_dest"), ("package_2", "package_2_dest")]:
+            pkg_pos = self._find_placement(pkg_id)
+            dest_pos = self._find_placement(dest_id)
+            if pkg_pos and dest_pos and pkg_pos == dest_pos:
+                return f"Package and its destination cannot be on the same cell"
+
+        return ""
+
+    def _build_map_data(self):
+        """Convert placements to the JSON-compatible map data dict."""
+        data = {"board_size": board_size, "robots": [], "packages": [], "charge_stations": []}
+
+        # Robots
+        for rid in ["robot_0", "robot_1"]:
+            pos = self._find_placement(rid)
+            data["robots"].append({
+                "position": list(pos),
+                "battery": 20,
+                "credit": 0
+            })
+
+        # Packages
+        for pkg_id, dest_id in [("package_1", "package_1_dest"), ("package_2", "package_2_dest")]:
+            pkg_pos = self._find_placement(pkg_id)
+            dest_pos = self._find_placement(dest_id)
+            data["packages"].append({
+                "position": list(pkg_pos),
+                "destination": list(dest_pos),
+                "on_board": True
+            })
+
+        # Charge stations
+        for cid in ["charge_1", "charge_2"]:
+            pos = self._find_placement(cid)
+            data["charge_stations"].append({"position": list(pos)})
+
+        return data
+
+    def handle_event(self, event):
+        self.error_msg = ""
+
+        # Palette selection
+        for tool_id, btn in self.palette_buttons.items():
+            if btn.handle_event(event):
+                self.selected_tool = tool_id
+                return None
+
+        # Grid hover
+        if event.type == pygame.MOUSEMOTION:
+            self.hovered_cell = self._cell_from_pos(event.pos)
+
+        # Grid click — place or erase
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            cell = self._cell_from_pos(event.pos)
+            if cell is not None and self.selected_tool is not None:
+                if self.selected_tool == "eraser":
+                    self.placements.pop(cell, None)
+                else:
+                    # Remove previous placement of this tool (each tool is unique)
+                    old_pos = self._find_placement(self.selected_tool)
+                    if old_pos is not None:
+                        del self.placements[old_pos]
+                    self.placements[cell] = self.selected_tool
+
+        # Action buttons
+        if self.clear_btn.handle_event(event):
+            self.placements.clear()
+            return None
+
+        if self.back_btn.handle_event(event):
+            return "back"
+
+        if self.save_btn.handle_event(event):
+            err = self._validate()
+            if err:
+                self.error_msg = err
+                return None
+            map_data = self._build_map_data()
+            return ("save", map_data)
+
+        return None
+
+    def draw(self, surface):
+        # Title
+        title_font = get_font(26, bold=True)
+        title = title_font.render("Custom Map Builder", True, BLACK)
+        surface.blit(title, title.get_rect(centerx=WINDOW_WIDTH // 2, y=15))
+
+        # Subtitle
+        sub_font = get_font(14)
+        sub = sub_font.render("Select an item, then click a cell to place it", True, DARK_GRAY)
+        surface.blit(sub, sub.get_rect(centerx=WINDOW_WIDTH // 2, y=50))
+
+        # Palette buttons
+        for tool_id, btn in self.palette_buttons.items():
+            # Highlight selected tool
+            if tool_id == self.selected_tool:
+                highlight_rect = btn.rect.inflate(4, 4)
+                pygame.draw.rect(surface, BLUE, highlight_rect, width=3, border_radius=8)
+            btn.draw(surface)
+
+        # Grid lines
+        for i in range(board_size + 1):
+            pygame.draw.line(surface, BLACK,
+                             (self.GRID_X, i * self.CELL_SIZE + self.GRID_Y),
+                             (self.GRID_X + board_size * self.CELL_SIZE, i * self.CELL_SIZE + self.GRID_Y),
+                             width=3)
+            pygame.draw.line(surface, BLACK,
+                             (i * self.CELL_SIZE + self.GRID_X, self.GRID_Y),
+                             (i * self.CELL_SIZE + self.GRID_X, self.GRID_Y + board_size * self.CELL_SIZE),
+                             width=3)
+
+        # Hover highlight
+        if self.hovered_cell is not None:
+            hx, hy = self.hovered_cell
+            hover_rect = pygame.Rect(
+                self.GRID_X + hx * self.CELL_SIZE + 2,
+                self.GRID_Y + hy * self.CELL_SIZE + 2,
+                self.CELL_SIZE - 4, self.CELL_SIZE - 4
+            )
+            hover_surface = pygame.Surface((hover_rect.width, hover_rect.height), pygame.SRCALPHA)
+            hover_surface.fill((100, 150, 255, 60))
+            surface.blit(hover_surface, hover_rect.topleft)
+
+        # Draw placed items
+        for (cx, cy), tool_id in self.placements.items():
+            icon_key = TOOL_ICON_MAP.get(tool_id)
+            _, _, fallback_color, fallback_label = next(
+                t for t in MAP_TOOLS if t[0] == tool_id
+            )
+            ix = self.GRID_X + cx * self.CELL_SIZE + 10
+            iy = self.GRID_Y + cy * self.CELL_SIZE + 10
+            icon_size = 80
+
+            icon = self.icons.get(icon_key) if icon_key else None
+            if icon:
+                surface.blit(pygame.transform.scale(icon, (icon_size, icon_size)), (ix, iy))
+            else:
+                _draw_fallback_icon(surface, ix, iy, icon_size, icon_size,
+                                    fallback_color, fallback_label)
+
+        # Placement count / status
+        status_font = get_font(16)
+        placed_count = len(self.placements)
+        status_text = f"Items placed: {placed_count}/8"
+        if self.selected_tool:
+            tool_label = next(label for tid, label, _, _ in MAP_TOOLS if tid == self.selected_tool)
+            status_text += f"  |  Selected: {tool_label}"
+        status = status_font.render(status_text, True, DARK_GRAY)
+        surface.blit(status, (self.GRID_X, self.GRID_Y + board_size * self.CELL_SIZE + 10))
+
+        # Error message
+        if self.error_msg:
+            err_font = get_font(16, bold=True)
+            err = err_font.render(self.error_msg, True, RED)
+            surface.blit(err, err.get_rect(centerx=WINDOW_WIDTH // 2, y=740))
+
+        # Action buttons
+        self.clear_btn.draw(surface)
+        self.back_btn.draw(surface)
+        self.save_btn.draw(surface)
 
 
 class BatchSetupScreen:
@@ -1026,7 +1335,10 @@ class GameScreen:
 
         # Initialize environment
         self.env = WarehouseEnv()
-        self.env.generate(self.seed, 2 * self.count_steps)
+        if config.get("custom_map_data"):
+            self.env.load_from_map_data(config["custom_map_data"], 2 * self.count_steps)
+        else:
+            self.env.generate(self.seed, 2 * self.count_steps)
 
         # Initialize logger
         if self.logging_enabled:
@@ -1582,6 +1894,7 @@ class GameRunner:
         self.opening_screen = OpeningScreen()
         self.single_setup_screen = None
         self.batch_setup_screen = None
+        self.map_builder_screen = None
         self.game_screen = None
         self.batch_screen = None
         self.file_select_screen = None
@@ -1623,9 +1936,31 @@ class GameRunner:
                 self.game_screen = GameScreen(config)
                 self.current_screen = "game"
                 self.single_setup_screen = None
+            elif result == "build_map":
+                self.map_builder_screen = MapBuilderScreen()
+                self.current_screen = "map_builder"
             elif result == "back":
                 self.current_screen = "opening"
                 self.single_setup_screen = None
+
+        elif self.current_screen == "map_builder":
+            result = self.map_builder_screen.handle_event(event)
+            if isinstance(result, tuple) and result[0] == "save":
+                self.single_setup_screen.custom_map_data = result[1]
+                # Write temp JSON file
+                import json
+                import tempfile
+                tmp = tempfile.NamedTemporaryFile(
+                    mode='w', suffix='.json', prefix='custom_map_',
+                    delete=False, dir='.'
+                )
+                json.dump(result[1], tmp, indent=2)
+                tmp.close()
+                self.current_screen = "single_setup"
+                self.map_builder_screen = None
+            elif result == "back":
+                self.current_screen = "single_setup"
+                self.map_builder_screen = None
 
         elif self.current_screen == "batch_setup":
             result = self.batch_setup_screen.handle_event(event)
@@ -1690,6 +2025,8 @@ class GameRunner:
             self.opening_screen.draw(self.screen)
         elif self.current_screen == "single_setup":
             self.single_setup_screen.draw(self.screen)
+        elif self.current_screen == "map_builder":
+            self.map_builder_screen.draw(self.screen)
         elif self.current_screen == "batch_setup":
             self.batch_setup_screen.draw(self.screen)
         elif self.current_screen == "game":
