@@ -48,8 +48,10 @@ def is_package_available(robot, package, opponent, remaining_moves) -> bool:
 
 # Evaluates the maximum potential value a robot can achieve given the current state.
 # Considers both packages on the board and the package currently held (if any).
-def get_max_package_value(robot, opponent, env: WarehouseEnv) -> float:
+# Now also returns the cost to the best package (for proximity bonus).
+def get_max_package_value(robot, opponent, env: WarehouseEnv) -> tuple:
     max_value = 0
+    best_cost = float('inf')
     remaining_moves = (env.num_steps + 1) // 2
 
     # 1. Check packages currently on the board
@@ -58,7 +60,11 @@ def get_max_package_value(robot, opponent, env: WarehouseEnv) -> float:
             cost = get_cost(robot, package)
             # Heuristic score: Reward divided by Cost (Efficiency)
             value = get_reward(package) / cost
-            max_value = max(max_value, value)
+            if value > max_value:
+                max_value = value
+                best_cost = cost
+            elif value == max_value:
+                best_cost = min(best_cost, cost)
 
     # 2. Check if robot is already carrying a package
     if robot.package is not None:
@@ -66,22 +72,27 @@ def get_max_package_value(robot, opponent, env: WarehouseEnv) -> float:
         cost = get_cost(robot, package)
         if remaining_moves >= cost and robot.battery >= cost and cost > 0:
             value = get_reward(package) / cost
-            max_value = max(max_value, value)
+            if value > max_value:
+                max_value = value
+                best_cost = cost
+            elif value == max_value:
+                best_cost = min(best_cost, cost)
 
-    return max_value
+    return max_value, best_cost
 
 
 # complex heuristic function combining multiple game factors:
 # - Potential package values for self vs opponent.
 # - Current score difference (Credit).
 # - Battery advantage (relative to nearest charging station).
+# - Proximity bonus: rewards being closer to the best available package.
 def smart_heuristic(env: WarehouseEnv, robot_id: int):
     robot = env.get_robot(robot_id)
     opponent = env.get_robot((robot_id + 1) % 2)
 
-    # Calculate potential future gains
-    max_value_me = get_max_package_value(robot, opponent, env)
-    max_value_opp = get_max_package_value(opponent, robot, env)
+    # Calculate potential future gains (now also returns cost to best package)
+    max_value_me, best_cost_me = get_max_package_value(robot, opponent, env)
+    max_value_opp, best_cost_opp = get_max_package_value(opponent, robot, env)
 
     # Calculate current state advantages
     credit_diff = robot.credit - opponent.credit
@@ -89,12 +100,18 @@ def smart_heuristic(env: WarehouseEnv, robot_id: int):
     battery_advantage_me = robot.battery - get_min_charge_distance(robot, env)
     battery_advantage_opp = opponent.battery - get_min_charge_distance(opponent, env)
 
+    # Proximity bonus: penalize distance to best package (lower cost = higher score)
+    proximity_me = -best_cost_me if best_cost_me < float('inf') else 0
+    proximity_opp = -best_cost_opp if best_cost_opp < float('inf') else 0
+
     # Weighted sum of components
     return (30 * max_value_me
             - 30 * max_value_opp
             + 4 * credit_diff
             + battery_advantage_me
-            - battery_advantage_opp)
+            - battery_advantage_opp
+            + 2 * proximity_me
+            - 2 * proximity_opp)
 
 smart_heurisitc = smart_heuristic
 
