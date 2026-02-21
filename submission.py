@@ -104,14 +104,23 @@ def smart_heuristic(env: WarehouseEnv, robot_id: int):
     proximity_me = -best_cost_me if best_cost_me < float('inf') else 0
     proximity_opp = -best_cost_opp if best_cost_opp < float('inf') else 0
 
+    carrying_bonus_me = 0
+    carrying_bonus_opp = 0
+    if robot.package is not None:
+        carrying_bonus_me = -manhattan_distance(robot.position, robot.package.destination)
+    if opponent.package is not None:
+        carrying_bonus_opp = -manhattan_distance(opponent.position, opponent.package.destination)
+
     # Weighted sum of components
-    return (30 * max_value_me
-            - 30 * max_value_opp
-            + 4 * credit_diff
+    return (10 * max_value_me
+            - 10 * max_value_opp
+            + 10 * credit_diff
             + battery_advantage_me
             - battery_advantage_opp
-            + 2 * proximity_me
-            - 2 * proximity_opp)
+            + 3 * proximity_me
+            - 1 * proximity_opp
+            + 3 * carrying_bonus_me
+            - 1 * carrying_bonus_opp)
 
 smart_heurisitc = smart_heuristic
 
@@ -277,8 +286,11 @@ class AgentAlphaBeta(Agent):
 
         operators = env.get_legal_operators(playerId)
 
-        # Move ordering: prioritize high-value moves for better pruning
-        operators.sort(key=lambda op: op not in ('drop off', 'pick up', 'charge'))
+        move_priority = {
+            'drop off': 0, 'pick up': 1, 'charge': 2,
+            'move south': 3, 'move east': 4, 'move west': 5, 'move north': 6, 'park': 7
+        }
+        operators.sort(key=lambda op: move_priority.get(op, 8))
 
         bestOp = None
 
