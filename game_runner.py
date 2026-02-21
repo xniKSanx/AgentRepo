@@ -631,8 +631,9 @@ class SingleGameSetupScreen:
         self.dropdown1 = Dropdown(160, 300, 400, 40, VALID_AGENT_NAMES, default_index=1)
 
         self.time_input = NumberInput(160, 390, "Time Limit (s):", 1.0, 0.1, 30.0, step=0.5, is_float=True)
+        self.steps_input = NumberInput(160, 510, "Max Rounds:", 200, 10, 99999, step=10)
         self.seed_input = NumberInput(160, 450, "Seed (0=random):", 0, 0, 9999, step=1)
-        self.steps_input = NumberInput(160, 510, "Max Rounds:", 4761, 10, 99999, step=100)
+
 
         self.log_checkbox = Checkbox(160, 580, "Enable Game Logging")
 
@@ -1016,7 +1017,7 @@ class BatchSetupScreen:
         self.dropdown1 = Dropdown(160, 255, 400, 40, VALID_AGENT_NAMES, default_index=1)
 
         self.time_input = NumberInput(160, 340, "Time Limit (s):", 1.0, 0.1, 30.0, step=0.5, is_float=True)
-        self.steps_input = NumberInput(160, 400, "Max Rounds:", 4761, 10, 99999, step=100)
+        self.steps_input = NumberInput(160, 400, "Max Rounds:", 200, 10, 99999, step=10)
 
         self.num_games_input = NumberInput(160, 480, "Num Games:", 100, 1, 10000, step=10)
         self.log_rate_input = NumberInput(160, 540, "Log Sample Rate:", 0, 0, 1000, step=1)
