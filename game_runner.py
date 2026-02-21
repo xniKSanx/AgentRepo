@@ -1,16 +1,21 @@
-import pygame
+import logging
+import os
+import random
 import threading
 import time
-import random
-import os
+import traceback as tb_module
 from enum import Enum
 from datetime import datetime
+
+import pygame
 
 from WarehouseEnv import WarehouseEnv, manhattan_distance, board_size
 from agent_registry import VALID_AGENT_NAMES
 from batch_runner import run_batch
 from simulation import determine_winner
 from execution import execute_agent_step, StepResult
+
+gui_logger = logging.getLogger("game_runner")
 
 # =============================================================================
 #                               Constants
@@ -1250,6 +1255,7 @@ class GameState(Enum):
     COMPUTING = "computing"
     ANIMATING = "animating"
     FINISHED = "finished"
+    FINISHED_ERROR = "finished_error"
 
 
 # =============================================================================
@@ -1396,8 +1402,11 @@ class GameScreen:
         self.run_btn.enabled = can_act
         self.step_move_btn.enabled = can_act
         self.step_round_btn.enabled = can_act
-        self.pause_btn.enabled = self.auto_run and self.game_state in (
-            GameState.COMPUTING, GameState.ANIMATING)
+        self.pause_btn.enabled = (
+            self.auto_run
+            and self.game_state in (GameState.COMPUTING, GameState.ANIMATING)
+        )
+        # Always allow starting a new game (including from error states)
         self.new_game_btn.enabled = True
 
     def handle_event(self, event):
@@ -1435,7 +1444,11 @@ class GameScreen:
                 step_result = self.worker.get_result()
                 if step_result.error:
                     agent_name = self.agent_names[self.current_agent_index]
-                    self.status_text = f"Agent error: {step_result.error}"
+                    gui_logger.error(
+                        "Agent execution error: round=%d, agent=%d (%s): %s",
+                        self.current_round, self.current_agent_index,
+                        agent_name, step_result.error,
+                    )
                     if self.logger:
                         self.logger.log_error(
                             self.current_round,
@@ -1443,7 +1456,10 @@ class GameScreen:
                             agent_name,
                             step_result.error,
                         )
-                    self.game_state = GameState.WAITING_FOR_INPUT
+                    self._finish_game_with_error(
+                        f"Agent {self.current_agent_index} ({agent_name}) "
+                        f"crashed: {step_result.error}"
+                    )
                 elif step_result.timed_out:
                     idx = self.current_agent_index
                     agent_name = self.agent_names[idx]
@@ -1485,7 +1501,31 @@ class GameScreen:
         self.worker.start(agent_name, self.env, self.current_agent_index, self.time_limit)
 
     def _apply_move(self, operator):
-        self.env.apply_operator(self.current_agent_index, operator)
+        try:
+            self.env.apply_operator(self.current_agent_index, operator)
+        except Exception as exc:
+            agent_name = self.agent_names[self.current_agent_index]
+            error_tb = tb_module.format_exc()
+            gui_logger.error(
+                "apply_operator failed: round=%d, agent=%d (%s), "
+                "operator='%s': %s\n%s",
+                self.current_round, self.current_agent_index,
+                agent_name, operator, exc, error_tb,
+            )
+            if self.logger:
+                self.logger.log_error(
+                    self.current_round,
+                    self.current_agent_index,
+                    agent_name,
+                    f"apply_operator exception: {type(exc).__name__}: {exc}",
+                )
+            self._finish_game_with_error(
+                f"Move error: {type(exc).__name__}: {exc}  "
+                f"(round {self.current_round}, agent {self.current_agent_index} "
+                f"[{agent_name}], operator '{operator}')"
+            )
+            return
+
         if self.logger:
             self.logger.log_move(
                 self.current_round,
@@ -1536,7 +1576,17 @@ class GameScreen:
     def _finish_game(self):
         self.game_state = GameState.FINISHED
         self.auto_run = False
-        balances = self.env.get_balances()
+        try:
+            balances = self.env.get_balances()
+        except Exception as exc:
+            gui_logger.warning(
+                "get_balances failed during finish (seed=%d): %s",
+                self.seed, exc, exc_info=True,
+            )
+            self._finish_game_with_error(
+                f"get_balances failed: {type(exc).__name__}: {exc}"
+            )
+            return
         winner = determine_winner(balances)
         if winner is None:
             self.result_text = f"Draw!  ({balances[0]} vs {balances[1]})"
@@ -1559,6 +1609,25 @@ class GameScreen:
                 self.status_text = f"Game Over - Log saved to {saved_path}"
             except OSError as e:
                 self.status_text = f"Game Over - Failed to save log: {e}"
+
+    def _finish_game_with_error(self, error_message):
+        """Transition to FINISHED_ERROR state with an explicit error outcome.
+
+        This is called when an env.apply_operator or get_balances call
+        fails during game play.  The error is logged and displayed in
+        the UI, but the GUI session continues (no crash).
+        """
+        self.game_state = GameState.FINISHED_ERROR
+        self.auto_run = False
+        self.result_text = f"ERROR: {error_message}"
+        self.status_text = "Game ended due to error"
+        if self.logger:
+            self.logger.log_result(f"ERROR: {error_message}", [0, 0])
+            try:
+                saved_path = self.logger.save()
+                self.status_text = f"Game ended due to error - Log saved to {saved_path}"
+            except OSError as e:
+                self.status_text = f"Game ended due to error - Failed to save log: {e}"
 
     def draw(self, surface):
         # Title
@@ -1609,6 +1678,17 @@ class GameScreen:
             pygame.draw.rect(surface, (40, 40, 40), banner_rect, border_radius=8)
             font = get_font(22, bold=True)
             text = font.render(self.result_text, True, WHITE)
+            surface.blit(text, text.get_rect(center=banner_rect.center))
+        elif self.game_state == GameState.FINISHED_ERROR and self.result_text:
+            # Error banner (red background to distinguish from normal finish)
+            banner_rect = pygame.Rect(10, 778, WINDOW_WIDTH - 20, 60)
+            pygame.draw.rect(surface, (160, 30, 30), banner_rect, border_radius=8)
+            font = get_font(18, bold=True)
+            # Truncate long error messages for display
+            display_text = self.result_text
+            if len(display_text) > 80:
+                display_text = display_text[:77] + "..."
+            text = font.render(display_text, True, WHITE)
             surface.blit(text, text.get_rect(center=banner_rect.center))
         else:
             font = get_font(16)
@@ -1944,19 +2024,58 @@ class GameRunner:
         self.current_screen = "opening"
 
     def run(self):
-        while self.running:
-            events = pygame.event.get()
-            for event in events:
-                if event.type == pygame.QUIT:
-                    self.running = False
-                    break
-                self._handle_event(event)
+        try:
+            while self.running:
+                events = pygame.event.get()
+                for event in events:
+                    if event.type == pygame.QUIT:
+                        self.running = False
+                        break
+                    self._handle_event(event)
 
-            self._update()
-            self._draw()
-            self.clock.tick(30)
+                self._update()
+                self._draw()
+                self.clock.tick(30)
+        except Exception:
+            self._write_crash_log()
+            raise
+        finally:
+            pygame.quit()
 
-        pygame.quit()
+    def _write_crash_log(self):
+        """Write a crash log for unexpected top-level exceptions.
+
+        Captures the traceback, current screen, and timestamp so that
+        session state and diagnostic context are not lost.
+        """
+        crash_tb = tb_module.format_exc()
+        crash_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        crash_filename = f"crash_log_{crash_time}.txt"
+        try:
+            lines = [
+                "=" * 60,
+                "AI WAREHOUSE GUI - CRASH LOG",
+                "=" * 60,
+                f"Timestamp: {datetime.now().isoformat()}",
+                f"Screen: {self.current_screen}",
+                "",
+                "--- Traceback ---",
+                crash_tb,
+                "=" * 60,
+            ]
+            with open(crash_filename, "w") as f:
+                f.write("\n".join(lines) + "\n")
+            gui_logger.critical(
+                "GUI crashed — crash log written to %s", crash_filename,
+            )
+        except Exception as log_exc:
+            # Last resort: print to stderr so the crash is not silent.
+            import sys
+            print(
+                f"Failed to write crash log ({log_exc}). "
+                f"Original traceback:\n{crash_tb}",
+                file=sys.stderr,
+            )
 
     def _handle_event(self, event):
         if self.current_screen == "opening":

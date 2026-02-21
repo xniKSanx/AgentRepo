@@ -10,24 +10,39 @@ the agent in a subprocess with monotonic-clock timing, and enforces
 timeouts via process termination.
 """
 
+import logging
 import time
+import traceback as tb_module
 from dataclasses import dataclass
 from typing import List, Optional
 
 from WarehouseEnv import WarehouseEnv
 from execution import execute_agent_step
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class GameResult:
-    """Result of a single completed game."""
+    """Result of a single completed game.
+
+    When ``error`` is not None the game encountered a failure.  The
+    ``error_phase``, ``error_type``, and ``error_traceback`` fields
+    provide structured context so callers can distinguish expected
+    execution errors from programming errors without parsing a string.
+
+    Errored games must be excluded from aggregate win/loss statistics.
+    """
     seed: int
     winner: Optional[int]           # 0, 1, or None for draw
     final_credits: List[int]        # [credit0, credit1]
     steps_taken: int
     timeout_flags: List[bool]       # [agent0_timed_out, agent1_timed_out]
-    error: Optional[str]            # None if no error
+    error: Optional[str]            # Human-readable summary; None if no error
     wall_time_seconds: float
+    error_phase: Optional[str] = None       # e.g. "agent_step", "apply_operator", "get_balances"
+    error_type: Optional[str] = None        # Exception class name, e.g. "RuntimeError"
+    error_traceback: Optional[str] = None   # Full traceback string for diagnostics
 
 
 def determine_winner(balances):
@@ -117,6 +132,10 @@ class GameSimulator:
 
         wall_start = time.monotonic()
 
+        error_phase = None
+        error_type = None
+        error_traceback = None
+
         try:
             for round_num in range(self.count_steps):
                 for agent_index, agent_name in enumerate(self.agent_names):
@@ -126,10 +145,18 @@ class GameSimulator:
                     )
 
                     if step.error:
-                        raise RuntimeError(
+                        error_phase = "agent_step"
+                        error_type = "AgentExecutionError"
+                        error_msg = (
                             f"Agent {agent_index} ({agent_name}) crashed: "
                             f"{step.error}"
                         )
+                        error_traceback = step.error
+                        logger.warning(
+                            "Agent %d (%s) crashed in round %d: %s",
+                            agent_index, agent_name, round_num, step.error,
+                        )
+                        raise RuntimeError(error_msg)
 
                     if step.timed_out:
                         timeout_flags[agent_index] = True
@@ -138,7 +165,25 @@ class GameSimulator:
                         steps_taken += 1
                         continue
 
-                    self.env.apply_operator(agent_index, step.operator)
+                    try:
+                        self.env.apply_operator(agent_index, step.operator)
+                    except Exception as apply_exc:
+                        error_phase = "apply_operator"
+                        error_type = type(apply_exc).__name__
+                        error_msg = (
+                            f"apply_operator failed for agent {agent_index} "
+                            f"({agent_name}), operator '{step.operator}' in "
+                            f"round {round_num}: {apply_exc}"
+                        )
+                        error_traceback = tb_module.format_exc()
+                        logger.warning(
+                            "apply_operator failed: agent=%d (%s), "
+                            "operator=%s, round=%d: %s",
+                            agent_index, agent_name, step.operator,
+                            round_num, apply_exc,
+                        )
+                        raise
+
                     steps_taken += 1
 
                     if turn_callback:
@@ -151,15 +196,41 @@ class GameSimulator:
                     break
 
         except Exception as e:
-            error_msg = f"{type(e).__name__}: {e}"
+            if error_msg is None:
+                # Unexpected exception not already captured above.
+                error_phase = "game_loop"
+                error_type = type(e).__name__
+                error_msg = f"{type(e).__name__}: {e}"
+                error_traceback = tb_module.format_exc()
+                logger.warning(
+                    "Unexpected error in game loop (seed=%d): %s",
+                    self.seed, error_msg, exc_info=True,
+                )
 
         wall_time = time.monotonic() - wall_start
 
+        # Retrieve final balances.  If get_balances itself fails, that
+        # is an error — do NOT substitute a neutral [0, 0] which would
+        # silently produce a draw outcome.
         try:
             balances = self.env.get_balances()
-        except Exception:
+        except Exception as bal_exc:
+            bal_tb = tb_module.format_exc()
+            logger.warning(
+                "get_balances failed (seed=%d): %s",
+                self.seed, bal_exc, exc_info=True,
+            )
+            # If a prior error already exists, keep it.  Otherwise
+            # record the get_balances failure as the primary error.
+            if error_msg is None:
+                error_phase = "get_balances"
+                error_type = type(bal_exc).__name__
+                error_msg = f"get_balances failed: {type(bal_exc).__name__}: {bal_exc}"
+                error_traceback = bal_tb
             balances = [0, 0]
 
+        # Errored games must NOT produce a winner — this prevents
+        # silent data corruption in aggregate statistics.
         winner = None if error_msg else determine_winner(balances)
 
         return GameResult(
@@ -170,4 +241,7 @@ class GameSimulator:
             timeout_flags=timeout_flags,
             error=error_msg,
             wall_time_seconds=round(wall_time, 4),
+            error_phase=error_phase,
+            error_type=error_type,
+            error_traceback=error_traceback,
         )

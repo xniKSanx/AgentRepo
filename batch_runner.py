@@ -100,6 +100,8 @@ def run_single_game(agent0_name, agent1_name, seed, count_steps,
         game_log_entries.append(f"Final credits: {result.final_credits}")
         if result.error:
             game_log_entries.append(f"Error: {result.error}")
+            game_log_entries.append(f"Error phase: {result.error_phase}")
+            game_log_entries.append(f"Error type: {result.error_type}")
         if any(result.timeout_flags):
             game_log_entries.append(f"Timeout flags: {result.timeout_flags}")
         if result.error:
@@ -227,19 +229,22 @@ def write_csv_output(results, output_dir):
         writer = csv.writer(f)
         writer.writerow([
             'game_index', 'seed', 'winner', 'credits_0', 'credits_1',
-            'steps_taken', 'timeout_0', 'timeout_1', 'error', 'wall_time_seconds'
+            'steps_taken', 'timeout_0', 'timeout_1', 'error',
+            'error_phase', 'error_type', 'wall_time_seconds'
         ])
         for i, r in enumerate(results):
             writer.writerow([
                 i,
                 r.seed,
-                r.winner if r.winner is not None else 'draw',
+                r.winner if r.winner is not None else ('error' if r.error else 'draw'),
                 r.final_credits[0],
                 r.final_credits[1],
                 r.steps_taken,
                 r.timeout_flags[0],
                 r.timeout_flags[1],
                 r.error or '',
+                r.error_phase or '',
+                r.error_type or '',
                 r.wall_time_seconds,
             ])
 
