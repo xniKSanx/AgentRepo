@@ -2,7 +2,6 @@ import random
 from copy import copy
 
 board_size = 5
-import time
 
 def manhattan_distance(p0, p1):
     return abs(p0[0] - p1[0]) + abs(p0[1] - p1[1])
@@ -45,10 +44,6 @@ class WarehouseEnv(object):
         self.robots = None
         self.seed = None
         self.num_steps = None
-
-        # for animation purposes
-        self.window = None
-        self.clock = None
 
     def generate(self, seed, num_steps):
         self.num_steps = num_steps
@@ -224,157 +219,3 @@ class WarehouseEnv(object):
 
         print('charge stations: ', self.charge_stations)
 
-    def _pygame_print_robot_data(self, robot, canvas, robot_index):
-        import pygame
-
-        robot_pos = robot.position
-        robot_pos_txt = 'position: ' + str(robot_pos)
-        robot_battery = robot.battery
-        robot_battery_txt = 'battery: ' + str(robot_battery)
-        robot_credit = robot.credit
-        robot_credit_txt = 'credit: ' + str(robot_credit)
-        robot_package = robot.package
-
-        font = pygame.font.Font('freesansbold.ttf', 16)
-        black = (0, 0, 0)
-        red = (255, 0, 0)
-        blue = (0, 0, 255)
-
-        if robot_index == 0:
-            canvas.blit(pygame.transform.scale(self.blue_robot_icon, (95, 95)), (95, 80))
-            text = font.render(robot_pos_txt, True, black)
-            canvas.blit(text, (185, 95))
-            text = font.render(robot_battery_txt, True, black)
-            canvas.blit(text, (185, 115))
-            text = font.render(robot_credit_txt, True, black)
-            canvas.blit(text, (185, 135))
-            if robot_package is not None:
-                robot_package_txt = 'package: ' + str(robot_package.position) + ' -> ' + str(robot_package.destination)
-                text = font.render(robot_package_txt, True, black)
-                canvas.blit(text, (185, 155))
-        else:
-            canvas.blit(pygame.transform.scale(self.red_robot_icon, (86, 86)), (355, 80))
-            text = font.render(robot_pos_txt, True, black)
-            canvas.blit(text, (445, 95))
-            text = font.render(robot_battery_txt, True, black)
-            canvas.blit(text, (445, 115))
-            text = font.render(robot_credit_txt, True, black)
-            canvas.blit(text, (445, 135))
-            if robot_package is not None:
-                robot_package_txt = 'package: ' + str(robot_package.position) + ' -> ' + str(robot_package.destination)
-                text = font.render(robot_package_txt, True, black)
-                canvas.blit(text, (445, 155))
-
-
-
-    def pygame_print(self):
-        import pygame
-
-        if self.window is None:
-            pygame.init()
-            self.window = pygame.display.set_mode((720, 720))
-            self.clock = pygame.time.Clock()
-            self.blue_robot_icon = pygame.image.load("icons/robot_b.jpeg").convert()
-            self.red_robot_icon = pygame.image.load("icons/robot_r.jpeg").convert()
-            self.blue_robot_package_icon = pygame.image.load("icons/robot_b_package.jpeg").convert()
-            self.red_robot_package_icon = pygame.image.load("icons/robot_r_package.jpeg").convert()
-            self.charge_stations_icon = pygame.image.load("icons/charge_station.jpeg").convert()
-            self.package_1_icon = pygame.image.load("icons/package_1.jpeg").convert()
-            self.package_2_icon = pygame.image.load("icons/package_2.jpeg").convert()
-            self.dest_1 = pygame.image.load("icons/dest_1.jpeg").convert()
-            self.dest_2 = pygame.image.load("icons/dest_2.jpeg").convert()
-            self.dest_red = pygame.image.load("icons/dest_red.jpeg").convert()
-            self.dest_blue = pygame.image.load("icons/dest_blue.jpeg").convert()
-
-        canvas = pygame.Surface((720, 720))
-        canvas.fill((255, 255, 255))
-
-        # Print robot's data
-        for robot_index in range(len(self.robots)):
-            self._pygame_print_robot_data(self.robots[robot_index], canvas, robot_index)
-
-        # Print title
-        font = pygame.font.Font('freesansbold.ttf', 28)
-        black = (0, 0, 0)
-        text = font.render('AI warehouse', True, black)
-        canvas.blit(text, (215, 20))
-
-        for x in range(6):
-            pygame.draw.line(
-                canvas,
-                0,
-                (110, x * 100 + 190),
-                (610, x * 100 + 190),
-                width=3,
-            )
-            pygame.draw.line(
-                canvas,
-                0,
-                (x * 100 + 110, 190),
-                (x * 100 + 110, 690),
-                width=3,
-            )
-
-        # Print board elements
-        for y in range(board_size):
-            for x in range(board_size):
-                p = (x, y)
-                robot = self.get_robot_in(p)
-                package = self.get_package_in(p)
-                charge_station = self.get_charge_station_in(p)
-                package_destination = [package for package in self.packages if
-                                       package.destination == p and package.on_board]
-                robot_package_destination = [i for i, robot in enumerate(self.robots) if
-                                             robot.package is not None
-                                             and robot.package.destination == p]
-                if robot:
-                    if self.robots.index(robot) == 0:
-                        if robot.package is not None:
-                            canvas.blit(pygame.transform.scale(self.blue_robot_package_icon, (95, 95)),
-                                        (x * 100 + 112, y * 100 + 192))
-                        else:
-                            canvas.blit(pygame.transform.scale(self.blue_robot_icon, (95, 95)),
-                                        (x * 100 + 112, y * 100 + 192))
-                    else:
-                        if robot.package is not None:
-                            canvas.blit(pygame.transform.scale(self.red_robot_package_icon, (95, 95)),
-                                        (x * 100 + 112, y * 100 + 192))
-                        else:
-                            canvas.blit(pygame.transform.scale(self.red_robot_icon, (95, 95)),
-                                        (x * 100 + 112, y * 100 + 192))
-                elif charge_station:
-                    canvas.blit(pygame.transform.scale(self.charge_stations_icon, (80, 80)),
-                                (x * 100 + 120, y * 100 + 200))
-
-                elif package and package.on_board:
-                    if self.packages.index(package) == 0:
-                        canvas.blit(pygame.transform.scale(self.package_1_icon, (80, 80)),
-                                    (x * 100 + 120, y * 100 + 200))
-                    else:
-                        canvas.blit(pygame.transform.scale(self.package_2_icon, (80, 80)),
-                                    (x * 100 + 120, y * 100 + 200))
-
-                elif len(package_destination) > 0:
-                    if self.packages.index(package_destination[0]) == 0:
-                        canvas.blit(pygame.transform.scale(self.dest_1, (80, 80)),
-                                    (x * 100 + 120, y * 100 + 200))
-                    else:
-                        canvas.blit(pygame.transform.scale(self.dest_2, (80, 80)),
-                                    (x * 100 + 120, y * 100 + 200))
-                elif len(robot_package_destination) > 0:
-                    if robot_package_destination[0] == 0:
-                        canvas.blit(pygame.transform.scale(self.dest_blue, (80, 80)),
-                                    (x * 100 + 120, y * 100 + 200))
-                    else:
-                        canvas.blit(pygame.transform.scale(self.dest_red, (80, 80)),
-                                    (x * 100 + 120, y * 100 + 200))
-
-        self.window.blit(canvas, (0, 0))
-        pygame.display.update()
-        self.clock.tick(5)
-
-        # Handle Pygame events
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                exit()
