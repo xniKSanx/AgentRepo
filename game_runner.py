@@ -7,7 +7,7 @@ from enum import Enum
 from datetime import datetime
 
 from WarehouseEnv import WarehouseEnv, manhattan_distance, board_size
-from agent_registry import build_agents, VALID_AGENT_NAMES
+from agent_registry import create_agent, VALID_AGENT_NAMES
 from batch_runner import run_batch
 from simulation import determine_winner
 
@@ -18,7 +18,6 @@ from simulation import determine_winner
 WINDOW_WIDTH = 720
 WINDOW_HEIGHT = 850
 
-AGENT_NAMES = VALID_AGENT_NAMES
 
 # Colors
 WHITE = (255, 255, 255)
@@ -579,14 +578,6 @@ class FileSelectScreen:
             surface.blit(err, err.get_rect(centerx=WINDOW_WIDTH // 2, y=660))
 
 
-# =============================================================================
-#                              Agent Helpers
-# =============================================================================
-
-
-def create_agents():
-    return build_agents()
-
 
 # =============================================================================
 #                              Screens
@@ -635,8 +626,8 @@ class SingleGameSetupScreen:
         self.custom_map_btn = Button(370, 110, 190, 38, "Build Custom Map",
                                      hover_color=HOVER_GRAY, font_size=18)
 
-        self.dropdown0 = Dropdown(160, 210, 400, 40, AGENT_NAMES, default_index=0)
-        self.dropdown1 = Dropdown(160, 300, 400, 40, AGENT_NAMES, default_index=1)
+        self.dropdown0 = Dropdown(160, 210, 400, 40, VALID_AGENT_NAMES, default_index=0)
+        self.dropdown1 = Dropdown(160, 300, 400, 40, VALID_AGENT_NAMES, default_index=1)
 
         self.time_input = NumberInput(160, 390, "Time Limit (s):", 1.0, 0.1, 30.0, step=0.5, is_float=True)
         self.seed_input = NumberInput(160, 450, "Seed (0=random):", 0, 0, 9999, step=1)
@@ -1020,8 +1011,8 @@ class MapBuilderScreen:
 
 class BatchSetupScreen:
     def __init__(self):
-        self.dropdown0 = Dropdown(160, 165, 400, 40, AGENT_NAMES, default_index=0)
-        self.dropdown1 = Dropdown(160, 255, 400, 40, AGENT_NAMES, default_index=1)
+        self.dropdown0 = Dropdown(160, 165, 400, 40, VALID_AGENT_NAMES, default_index=0)
+        self.dropdown1 = Dropdown(160, 255, 400, 40, VALID_AGENT_NAMES, default_index=1)
 
         self.time_input = NumberInput(160, 340, "Time Limit (s):", 1.0, 0.1, 30.0, step=0.5, is_float=True)
         self.steps_input = NumberInput(160, 400, "Max Rounds:", 4761, 10, 99999, step=100)
@@ -1335,7 +1326,7 @@ class GameScreen:
             self.logger.log_initial_state(self.env)
 
         # Initialize agents
-        self.agents = create_agents()
+        self.agents = [create_agent(name) for name in self.agent_names]
 
         # Load icons
         self.icons = load_icons()
@@ -1446,7 +1437,7 @@ class GameScreen:
 
     def _start_agent_computation(self):
         agent_name = self.agent_names[self.current_agent_index]
-        agent = self.agents[agent_name]
+        agent = self.agents[self.current_agent_index]
         self.game_state = GameState.COMPUTING
         self.status_text = f"Agent {self.current_agent_index} ({agent_name}) is thinking..."
         self.worker.start(agent, self.env, self.current_agent_index, self.time_limit)
