@@ -3,14 +3,19 @@
 Consolidates the game loop, result determination, and game result data
 that were previously duplicated across main.py, batch_runner.py, and
 game_runner.py.
+
+All agent moves are dispatched through the shared execution contract
+(``execution.execute_agent_step``), which clones the environment, runs
+the agent in a subprocess with monotonic-clock timing, and enforces
+timeouts via process termination.
 """
 
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Callable
+from typing import List, Optional
 
 from WarehouseEnv import WarehouseEnv
-from agent_registry import create_agent
+from execution import execute_agent_step
 
 
 @dataclass
@@ -43,7 +48,19 @@ class GameSimulator:
     Consolidates the game loop that was duplicated in main.py (single game,
     tournament), batch_runner.py, and the conceptual loop in game_runner.py.
 
-    Usage:
+    Every agent turn is executed through the shared execution contract
+    (``execute_agent_step``), which:
+
+    * Clones the environment so the agent cannot mutate the live state.
+    * Runs the agent in a subprocess with hard-kill timeout enforcement.
+    * Uses ``time.monotonic()`` for elapsed measurement.
+
+    If an agent times out, the move is **not** applied to the environment
+    and ``timeout_flags`` is set for that agent.  The game continues with
+    the next turn (the timed-out agent forfeits that move).
+
+    Usage::
+
         sim = GameSimulator(
             agent_names=["alphabeta", "greedy"],
             seed=42,
@@ -52,7 +69,8 @@ class GameSimulator:
         )
         result = sim.run()
 
-    The optional turn_callback is invoked after each agent move:
+    The optional *turn_callback* is invoked after each **successful** move::
+
         turn_callback(round_num, agent_index, agent_name, operator, env)
     """
 
@@ -82,15 +100,13 @@ class GameSimulator:
             else:
                 self.env.generate(seed, 2 * count_steps)
 
-        # Create one fresh agent instance per player (distinct even if same name)
-        self.agents = [create_agent(name) for name in agent_names]
-
     def run(self, turn_callback=None):
         """Run the game to completion and return a GameResult.
 
         Args:
             turn_callback: Optional callable(round_num, agent_index,
-                          agent_name, operator, env) called after each move.
+                          agent_name, operator, env) called after each
+                          successful (non-timed-out, non-errored) move.
 
         Returns:
             GameResult with the outcome of the game.
@@ -99,30 +115,37 @@ class GameSimulator:
         error_msg = None
         steps_taken = 0
 
-        wall_start = time.time()
+        wall_start = time.monotonic()
 
         try:
             for round_num in range(self.count_steps):
                 for agent_index, agent_name in enumerate(self.agent_names):
-                    agent = self.agents[agent_index]
 
-                    start = time.time()
-                    try:
-                        op = agent.run_step(self.env, agent_index, self.time_limit)
-                    except Exception as agent_err:
+                    step = execute_agent_step(
+                        agent_name, self.env, agent_index, self.time_limit,
+                    )
+
+                    if step.error:
                         raise RuntimeError(
-                            f"Agent {agent_index} ({agent_name}) crashed: {agent_err}"
-                        ) from agent_err
+                            f"Agent {agent_index} ({agent_name}) crashed: "
+                            f"{step.error}"
+                        )
 
-                    elapsed = time.time() - start
-                    if elapsed > self.time_limit:
+                    if step.timed_out:
                         timeout_flags[agent_index] = True
+                        # Timed-out move is NOT applied.  The agent
+                        # forfeits this turn; the game continues.
+                        steps_taken += 1
+                        continue
 
-                    self.env.apply_operator(agent_index, op)
+                    self.env.apply_operator(agent_index, step.operator)
                     steps_taken += 1
 
                     if turn_callback:
-                        turn_callback(round_num, agent_index, agent_name, op, self.env)
+                        turn_callback(
+                            round_num, agent_index, agent_name,
+                            step.operator, self.env,
+                        )
 
                 if self.env.done():
                     break
@@ -130,7 +153,7 @@ class GameSimulator:
         except Exception as e:
             error_msg = f"{type(e).__name__}: {e}"
 
-        wall_time = time.time() - wall_start
+        wall_time = time.monotonic() - wall_start
 
         try:
             balances = self.env.get_balances()
