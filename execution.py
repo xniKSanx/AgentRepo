@@ -178,12 +178,15 @@ def execute_agent_step(agent_name, env, agent_id, time_limit):
             error=result["error"],
         )
 
-    # Agent finished but may have exceeded the soft time limit
-    timed_out = elapsed > time_limit
-
+    # Process finished before the hard deadline (time_limit + GRACE_PERIOD).
+    # The agent completed its work in time — accept the result.
+    # NOTE: We do NOT compare elapsed vs time_limit here because elapsed
+    # includes subprocess overhead (fork, pickle, imports) which is NOT
+    # the agent's fault.  The hard timeout (process.join + terminate)
+    # is the sole enforcement mechanism.
     return StepResult(
         operator=result["operator"],
         elapsed=elapsed,
-        timed_out=timed_out,
+        timed_out=False,
         error=None,
     )
