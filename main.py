@@ -1,24 +1,10 @@
 import random
 import sys
-import time
 
 from WarehouseEnv import WarehouseEnv
 import argparse
-import submission
-import Agent
 
-
-def build_agents():
-    """Build and return the agent name-to-instance dictionary."""
-    return {
-        "random": Agent.AgentRandom(),
-        "greedy": Agent.AgentGreedy(),
-        "greedyImproved": submission.AgentGreedyImproved(),
-        "minimax": submission.AgentMinimax(),
-        "alphabeta": submission.AgentAlphaBeta(),
-        "expectimax": submission.AgentExpectimax(),
-        "hardcoded": submission.AgentHardCoded(),
-    }
+from simulation import GameSimulator
 
 
 def build_parser():
@@ -39,7 +25,6 @@ def build_parser():
                             help='Number of steps each robot gets before game is over',
                             default=4761)
     run_parser.add_argument('--console_print', action='store_true')
-    run_parser.add_argument('--screen_print', action='store_true')
     run_parser.add_argument('--tournament', action='store_true')
 
     # ---- "batch" subcommand (new) ----
@@ -84,80 +69,74 @@ def run_single_or_tournament(args):
     if args.seed is None:
         args.seed = random.randint(0, 255)
 
-    agents = build_agents()
-
     agent_names = [args.agent0, args.agent1]
     env = WarehouseEnv()
 
     if not args.tournament:
-        env.generate(args.seed, 2*args.count_steps)
+        # --- Single game using GameSimulator ---
+        def on_turn(round_num, agent_index, agent_name, op, env):
+            if args.console_print:
+                print('robot ' + str(agent_index) + ' chose ' + op)
+                env.print()
+
+        env.generate(args.seed, 2 * args.count_steps)
 
         if args.console_print:
             print('initial board:')
             env.print()
 
-        if args.screen_print:
-            env.pygame_print()
+        sim = GameSimulator(
+            agent_names=agent_names,
+            seed=args.seed,
+            count_steps=args.count_steps,
+            time_limit=args.time_limit,
+            env=env,
+        )
+        result = sim.run(turn_callback=on_turn)
 
-        for _ in range(args.count_steps):
-            for i, agent_name in enumerate(agent_names):
-                agent = agents[agent_name]
-                start = time.time()
-                op = agent.run_step(env, i, args.time_limit)
-                end = time.time()
-                if end - start > args.time_limit:
-                    raise RuntimeError("Agent used too much time!")
-                env.apply_operator(i, op)
-                if args.console_print:
-                    print('robot ' + str(i) + ' chose ' + op)
-                    env.print()
-                if args.screen_print:
-                    env.pygame_print()
-            if env.done():
-                break
-        balances = env.get_balances()
-        print(balances)
-        if balances[0] == balances[1]:
+        print(result.final_credits)
+        if result.winner is None:
             print('draw')
         else:
-            print('robot', balances.index(max(balances)), 'wins!')
+            print('robot', result.winner, 'wins!')
     else:
+        # --- Tournament mode ---
         robot0_wins = 0
         robot1_wins = 0
         draws = 0
         num_of_games = 100
 
         for i in range(num_of_games):
-            env.generate(args.seed + i, 2*args.count_steps)
+            game_seed = args.seed + i
+
+            def on_turn(round_num, agent_index, agent_name, op, env):
+                if args.console_print:
+                    print('robot ' + str(agent_index) + ' chose ' + op)
+                    env.print()
+
+            game_env = WarehouseEnv()
+            game_env.generate(game_seed, 2 * args.count_steps)
+
             if args.console_print:
                 print('initial board:')
-                env.print()
-            if args.screen_print:
-                env.pygame_print()
+                game_env.print()
 
-            for _ in range(args.count_steps):
-                for i, agent_name in enumerate(agent_names):
-                    agent = agents[agent_name]
-                    start = time.time()
-                    op = agent.run_step(env, i, args.time_limit)
-                    end = time.time()
-                    if end - start > args.time_limit:
-                        raise RuntimeError("Agent used too much time!")
-                    env.apply_operator(i, op)
-                if args.console_print:
-                    print('robot ' + str(i) + ' chose ' + op)
-                    env.print()
-                if args.screen_print:
-                    env.pygame_print()
-                if env.done():
-                    break
-            balances = env.get_balances()
-            if balances[0] == balances[1]:
+            sim = GameSimulator(
+                agent_names=agent_names,
+                seed=game_seed,
+                count_steps=args.count_steps,
+                time_limit=args.time_limit,
+                env=game_env,
+            )
+            result = sim.run(turn_callback=on_turn)
+
+            if result.winner is None:
                 draws += 1
-            elif balances[0] > balances[1]:
+            elif result.winner == 0:
                 robot0_wins += 1
             else:
                 robot1_wins += 1
+
         print("Robot 0 wins: ", robot0_wins)
         print("Robot 1 wins: ", robot1_wins)
         print("Draws: ", draws)

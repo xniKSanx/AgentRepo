@@ -10,36 +10,8 @@ from dataclasses import dataclass, asdict
 from typing import List, Optional
 
 from WarehouseEnv import WarehouseEnv
-import Agent
-import submission
-
-
-def build_agents():
-    """Build and return the agent name-to-instance dictionary."""
-    return {
-        "random": Agent.AgentRandom(),
-        "greedy": Agent.AgentGreedy(),
-        "greedyImproved": submission.AgentGreedyImproved(),
-        "minimax": submission.AgentMinimax(),
-        "alphabeta": submission.AgentAlphaBeta(),
-        "expectimax": submission.AgentExpectimax(),
-        "hardcoded": submission.AgentHardCoded(),
-    }
-
-
-VALID_AGENT_NAMES = list(build_agents().keys())
-
-
-@dataclass
-class GameResult:
-    game_index: int
-    seed: int
-    winner: Optional[int]           # 0, 1, or None for draw
-    final_credits: List[int]        # [credit0, credit1]
-    steps_taken: int
-    timeout_flags: List[bool]       # [agent0_timed_out, agent1_timed_out]
-    error: Optional[str]            # None if no error, else error message
-    wall_time_seconds: float
+from agent_registry import VALID_AGENT_NAMES
+from simulation import GameSimulator, GameResult, determine_winner
 
 
 def resolve_seeds(config):
@@ -82,105 +54,64 @@ def save_game_log(entries, game_index, seed, output_dir):
 
 def run_single_game(agent0_name, agent1_name, seed, count_steps,
                     time_limit, game_index, log_this_game, output_dir):
-    """Run a single game and return a GameResult.
+    """Run a single game using GameSimulator and return a GameResult.
 
-    Agents are re-instantiated per game to avoid state leakage
-    (e.g. AgentHardCoded.step).
+    Uses the shared simulation engine to avoid duplicating the game loop.
     """
-    agents = build_agents()
     agent_names = [agent0_name, agent1_name]
-    env = WarehouseEnv()
-    timeout_flags = [False, False]
-    error_msg = None
-    steps_taken = 0
     game_log_entries = [] if log_this_game else None
 
-    wall_start = time.time()
+    # Set up logging callback
+    if game_log_entries is not None:
+        game_log_entries.append(f"=== Game {game_index} ===")
+        game_log_entries.append(f"Agents: {agent0_name} vs {agent1_name}")
+        game_log_entries.append(f"Config: time_limit={time_limit}, count_steps={count_steps}")
+        game_log_entries.append("")
 
-    try:
-        env.generate(seed, 2 * count_steps)
+    # Create environment and capture initial state for logging
+    env = WarehouseEnv()
+    env.generate(seed, 2 * count_steps)
 
+    if game_log_entries is not None:
+        game_log_entries.append("--- Initial State ---")
+        game_log_entries.append(capture_initial_state(env, seed))
+        game_log_entries.append("")
+        game_log_entries.append("--- Moves ---")
+
+    def on_turn(round_num, agent_index, agent_name, op, env):
         if game_log_entries is not None:
-            game_log_entries.append(f"=== Game {game_index} ===")
-            game_log_entries.append(f"Agents: {agent0_name} vs {agent1_name}")
-            game_log_entries.append(f"Config: time_limit={time_limit}, count_steps={count_steps}")
-            game_log_entries.append("")
-            game_log_entries.append("--- Initial State ---")
-            game_log_entries.append(capture_initial_state(env, seed))
-            game_log_entries.append("")
-            game_log_entries.append("--- Moves ---")
+            game_log_entries.append(
+                f"  Round {round_num}, Agent {agent_index} ({agent_name}): {op}"
+            )
 
-        for step in range(count_steps):
-            for i, agent_name in enumerate(agent_names):
-                agent = agents[agent_name]
-                start = time.time()
-                try:
-                    op = agent.run_step(env, i, time_limit)
-                except Exception as agent_err:
-                    raise RuntimeError(
-                        f"Agent {i} ({agent_name}) crashed: {agent_err}"
-                    ) from agent_err
-
-                elapsed = time.time() - start
-                if elapsed > time_limit:
-                    timeout_flags[i] = True
-
-                env.apply_operator(i, op)
-                steps_taken += 1
-
-                if game_log_entries is not None:
-                    game_log_entries.append(
-                        f"  Round {step}, Agent {i} ({agent_name}): {op}"
-                    )
-
-            if env.done():
-                break
-
-    except Exception as e:
-        error_msg = f"{type(e).__name__}: {e}"
-
-    wall_time = time.time() - wall_start
-
-    try:
-        balances = env.get_balances()
-    except Exception:
-        balances = [0, 0]
-
-    # Determine winner
-    if error_msg is not None:
-        winner = None
-    elif balances[0] > balances[1]:
-        winner = 0
-    elif balances[1] > balances[0]:
-        winner = 1
-    else:
-        winner = None  # draw
+    sim = GameSimulator(
+        agent_names=agent_names,
+        seed=seed,
+        count_steps=count_steps,
+        time_limit=time_limit,
+        env=env,
+    )
+    result = sim.run(turn_callback=on_turn)
 
     # Finalize and save game log if sampled
     if game_log_entries is not None:
         game_log_entries.append("")
         game_log_entries.append("--- Result ---")
-        game_log_entries.append(f"Final credits: {balances}")
-        if error_msg:
-            game_log_entries.append(f"Error: {error_msg}")
-        if any(timeout_flags):
-            game_log_entries.append(f"Timeout flags: {timeout_flags}")
-        winner_str = f"Robot {winner} wins" if winner is not None else "Draw"
-        if error_msg:
+        game_log_entries.append(f"Final credits: {result.final_credits}")
+        if result.error:
+            game_log_entries.append(f"Error: {result.error}")
+        if any(result.timeout_flags):
+            game_log_entries.append(f"Timeout flags: {result.timeout_flags}")
+        if result.error:
             winner_str = "Error (no winner)"
+        elif result.winner is not None:
+            winner_str = f"Robot {result.winner} wins"
+        else:
+            winner_str = "Draw"
         game_log_entries.append(f"Outcome: {winner_str}")
         save_game_log(game_log_entries, game_index, seed, output_dir)
 
-    return GameResult(
-        game_index=game_index,
-        seed=seed,
-        winner=winner,
-        final_credits=balances,
-        steps_taken=steps_taken,
-        timeout_flags=timeout_flags,
-        error=error_msg,
-        wall_time_seconds=round(wall_time, 4),
-    )
+    return result
 
 
 def percentile(sorted_list, pct):
@@ -298,9 +229,9 @@ def write_csv_output(results, output_dir):
             'game_index', 'seed', 'winner', 'credits_0', 'credits_1',
             'steps_taken', 'timeout_0', 'timeout_1', 'error', 'wall_time_seconds'
         ])
-        for r in results:
+        for i, r in enumerate(results):
             writer.writerow([
-                r.game_index,
+                i,
                 r.seed,
                 r.winner if r.winner is not None else 'draw',
                 r.final_credits[0],

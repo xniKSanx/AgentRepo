@@ -7,9 +7,9 @@ from enum import Enum
 from datetime import datetime
 
 from WarehouseEnv import WarehouseEnv, manhattan_distance, board_size
-import Agent
-import submission
+from agent_registry import build_agents, VALID_AGENT_NAMES
 from batch_runner import run_batch
+from simulation import determine_winner
 
 # =============================================================================
 #                               Constants
@@ -18,10 +18,7 @@ from batch_runner import run_batch
 WINDOW_WIDTH = 720
 WINDOW_HEIGHT = 850
 
-AGENT_NAMES = [
-    "random", "greedy", "greedyImproved", "minimax",
-    "alphabeta", "expectimax", "hardcoded",
-]
+AGENT_NAMES = VALID_AGENT_NAMES
 
 # Colors
 WHITE = (255, 255, 255)
@@ -588,15 +585,7 @@ class FileSelectScreen:
 
 
 def create_agents():
-    return {
-        "random": Agent.AgentRandom(),
-        "greedy": Agent.AgentGreedy(),
-        "greedyImproved": submission.AgentGreedyImproved(),
-        "minimax": submission.AgentMinimax(),
-        "alphabeta": submission.AgentAlphaBeta(),
-        "expectimax": submission.AgentExpectimax(),
-        "hardcoded": submission.AgentHardCoded(),
-    }
+    return build_agents()
 
 
 # =============================================================================
@@ -1501,13 +1490,12 @@ class GameScreen:
         self.game_state = GameState.FINISHED
         self.auto_run = False
         balances = self.env.get_balances()
-        if balances[0] == balances[1]:
+        winner = determine_winner(balances)
+        if winner is None:
             self.result_text = f"Draw!  ({balances[0]} vs {balances[1]})"
-        elif balances[0] > balances[1]:
-            self.result_text = (f"Robot 0 - {self.agent_names[0]} (Blue) wins!  "
-                                f"({balances[0]} vs {balances[1]})")
         else:
-            self.result_text = (f"Robot 1 - {self.agent_names[1]} (Red) wins!  "
+            self.result_text = (f"Robot {winner} - {self.agent_names[winner]} "
+                                f"({'Blue' if winner == 0 else 'Red'}) wins!  "
                                 f"({balances[0]} vs {balances[1]})")
         self.status_text = "Game Over"
         if self.logger:
