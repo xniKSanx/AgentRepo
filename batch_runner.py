@@ -12,6 +12,10 @@ from typing import List, Optional
 from WarehouseEnv import WarehouseEnv
 from agent_registry import VALID_AGENT_NAMES
 from simulation import GameSimulator, GameResult, determine_winner
+from logging_contract import (
+    format_batch_header, format_move_line_batch,
+    jsonl_path_for, write_jsonl_sidecar, LOG_VERSION,
+)
 
 
 def resolve_seeds(config):
@@ -43,13 +47,18 @@ def capture_initial_state(env, seed):
     return '\n'.join(lines)
 
 
-def save_game_log(entries, game_index, seed, output_dir):
-    """Write a sampled game log to disk."""
+def save_game_log(entries, game_index, seed, output_dir,
+                   jsonl_header=None, jsonl_moves=None, jsonl_result=None):
+    """Write a sampled game log to disk with JSONL sidecar."""
     log_dir = os.path.join(output_dir, 'game_logs')
     os.makedirs(log_dir, exist_ok=True)
     filepath = os.path.join(log_dir, f'game_{game_index:04d}_seed_{seed}.txt')
     with open(filepath, 'w') as f:
         f.write('\n'.join(entries) + '\n')
+    # Write structured JSONL sidecar alongside the text log
+    if jsonl_header is not None and jsonl_moves is not None:
+        jsonl_fp = jsonl_path_for(filepath)
+        write_jsonl_sidecar(jsonl_fp, jsonl_header, jsonl_moves, jsonl_result)
 
 
 def run_single_game(agent0_name, agent1_name, seed, count_steps,
@@ -60,13 +69,13 @@ def run_single_game(agent0_name, agent1_name, seed, count_steps,
     """
     agent_names = [agent0_name, agent1_name]
     game_log_entries = [] if log_this_game else None
+    jsonl_moves = [] if log_this_game else None
 
     # Set up logging callback
     if game_log_entries is not None:
-        game_log_entries.append(f"=== Game {game_index} ===")
-        game_log_entries.append(f"Agents: {agent0_name} vs {agent1_name}")
-        game_log_entries.append(f"Config: time_limit={time_limit}, count_steps={count_steps}")
-        game_log_entries.append("")
+        game_log_entries.extend(format_batch_header(
+            game_index, agent0_name, agent1_name, time_limit, count_steps, seed,
+        ))
 
     # Create environment and capture initial state for logging
     env = WarehouseEnv()
@@ -81,8 +90,14 @@ def run_single_game(agent0_name, agent1_name, seed, count_steps,
     def on_turn(round_num, agent_index, agent_name, op, env):
         if game_log_entries is not None:
             game_log_entries.append(
-                f"  Round {round_num}, Agent {agent_index} ({agent_name}): {op}"
+                format_move_line_batch(round_num, agent_index, agent_name, op)
             )
+        if jsonl_moves is not None:
+            jsonl_moves.append({
+                "round": round_num,
+                "agent": agent_index,
+                "operator": op,
+            })
 
     sim = GameSimulator(
         agent_names=agent_names,
@@ -111,7 +126,20 @@ def run_single_game(agent0_name, agent1_name, seed, count_steps,
         else:
             winner_str = "Draw"
         game_log_entries.append(f"Outcome: {winner_str}")
-        save_game_log(game_log_entries, game_index, seed, output_dir)
+        jsonl_header = {
+            "seed": seed,
+            "count_steps": count_steps,
+            "agent_names": [agent0_name, agent1_name],
+            "time_limit": time_limit,
+        }
+        jsonl_result = {
+            "final_credits": list(result.final_credits),
+            "winner": result.winner,
+            "error": result.error,
+        }
+        save_game_log(game_log_entries, game_index, seed, output_dir,
+                       jsonl_header=jsonl_header, jsonl_moves=jsonl_moves,
+                       jsonl_result=jsonl_result)
 
     return result
 
