@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Callable
 
 from WarehouseEnv import WarehouseEnv
-from agent_registry import build_agents
+from agent_registry import create_agent
 
 
 @dataclass
@@ -82,8 +82,8 @@ class GameSimulator:
             else:
                 self.env.generate(seed, 2 * count_steps)
 
-        # Build fresh agents per game to avoid state leakage
-        self.agents = build_agents()
+        # Create one fresh agent instance per player (distinct even if same name)
+        self.agents = [create_agent(name) for name in agent_names]
 
     def run(self, turn_callback=None):
         """Run the game to completion and return a GameResult.
@@ -104,7 +104,7 @@ class GameSimulator:
         try:
             for round_num in range(self.count_steps):
                 for agent_index, agent_name in enumerate(self.agent_names):
-                    agent = self.agents[agent_name]
+                    agent = self.agents[agent_index]
 
                     start = time.time()
                     try:
