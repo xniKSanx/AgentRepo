@@ -7,9 +7,10 @@ from enum import Enum
 from datetime import datetime
 
 from WarehouseEnv import WarehouseEnv, manhattan_distance, board_size
-from agent_registry import create_agent, VALID_AGENT_NAMES
+from agent_registry import VALID_AGENT_NAMES
 from batch_runner import run_batch
 from simulation import determine_winner
+from execution import execute_agent_step, StepResult
 
 # =============================================================================
 #                               Constants
@@ -1110,40 +1111,63 @@ class BatchSetupScreen:
 
 
 class AgentWorker:
-    def __init__(self):
-        self.thread = None
-        self.result_op = None
-        self.error = None
-        self.done = False
+    """Runs an agent step asynchronously for the GUI.
 
-    def start(self, agent, env, agent_id, time_limit):
-        self.result_op = None
-        self.error = None
-        self.done = False
-        env_clone = env.clone()
-        self.thread = threading.Thread(
+    Uses ``threading.Event`` for completion signaling and
+    ``threading.Lock`` to guard all cross-thread shared state, replacing
+    the previous unsynchronized bare-attribute access pattern.
+
+    Internally delegates to ``execute_agent_step()`` (the shared execution
+    contract), which spawns a subprocess with hard-kill timeout
+    enforcement.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._done_event = threading.Event()
+        self._result = None  # type: StepResult | None
+        self._thread = None  # type: threading.Thread | None
+
+    def start(self, agent_name, env, agent_id, time_limit):
+        """Launch an agent step in a background thread.
+
+        Parameters
+        ----------
+        agent_name : str
+            Registry name of the agent (the agent is instantiated inside
+            the subprocess, not here).
+        env : WarehouseEnv
+            Live game environment — cloned internally by the executor.
+        agent_id : int
+            Robot index (0 or 1).
+        time_limit : float
+            Seconds allowed for the move.
+        """
+        self._done_event.clear()
+        with self._lock:
+            self._result = None
+        self._thread = threading.Thread(
             target=self._run,
-            args=(agent, env_clone, agent_id, time_limit),
+            args=(agent_name, env, agent_id, time_limit),
             daemon=True,
         )
-        self.thread.start()
+        self._thread.start()
 
-    def _run(self, agent, env_clone, agent_id, time_limit):
-        try:
-            self.result_op = agent.run_step(env_clone, agent_id, time_limit)
-        except Exception as e:
-            self.error = e
-        finally:
-            self.done = True
+    def _run(self, agent_name, env, agent_id, time_limit):
+        """Thread target — calls the shared executor and stores the result."""
+        step_result = execute_agent_step(agent_name, env, agent_id, time_limit)
+        with self._lock:
+            self._result = step_result
+        self._done_event.set()
 
     def is_done(self):
-        return self.done
+        """Return True when the agent step has completed (thread-safe)."""
+        return self._done_event.is_set()
 
     def get_result(self):
-        return self.result_op
-
-    def get_error(self):
-        return self.error
+        """Return the ``StepResult``, or None if not yet done (thread-safe)."""
+        with self._lock:
+            return self._result
 
 
 # =============================================================================
@@ -1325,8 +1349,8 @@ class GameScreen:
             self.logger = GameLogger(config)
             self.logger.log_initial_state(self.env)
 
-        # Initialize agents
-        self.agents = [create_agent(name) for name in self.agent_names]
+        # Agents are instantiated per-step inside subprocesses by the
+        # shared executor (execute_agent_step).  No pre-creation needed.
 
         # Load icons
         self.icons = load_icons()
@@ -1340,6 +1364,9 @@ class GameScreen:
         self.auto_run = False
         self.step_mode = None  # "move" or "round"
         self.round_step_needs_second = False  # for round stepping: agent 1 still needs to go
+
+        # Timeout tracking
+        self.timeout_flags = [False, False]
 
         # Animation
         self.animation_start = 0
@@ -1404,19 +1431,34 @@ class GameScreen:
     def update(self):
         if self.game_state == GameState.COMPUTING:
             if self.worker.is_done():
-                if self.worker.get_error():
-                    self.status_text = f"Agent error: {self.worker.get_error()}"
+                step_result = self.worker.get_result()
+                if step_result.error:
+                    agent_name = self.agent_names[self.current_agent_index]
+                    self.status_text = f"Agent error: {step_result.error}"
                     if self.logger:
                         self.logger.log_error(
                             self.current_round,
                             self.current_agent_index,
-                            self.agent_names[self.current_agent_index],
-                            self.worker.get_error(),
+                            agent_name,
+                            step_result.error,
                         )
                     self.game_state = GameState.WAITING_FOR_INPUT
+                elif step_result.timed_out:
+                    idx = self.current_agent_index
+                    agent_name = self.agent_names[idx]
+                    self.timeout_flags[idx] = True
+                    self.status_text = (
+                        f"Agent {idx} ({agent_name}) timed out "
+                        f"({step_result.elapsed:.2f}s) - turn forfeited"
+                    )
+                    if self.logger:
+                        self.logger.log_error(
+                            self.current_round, idx, agent_name,
+                            f"Timeout ({step_result.elapsed:.2f}s)",
+                        )
+                    self._advance_turn_after_timeout()
                 else:
-                    op = self.worker.get_result()
-                    self._apply_move(op)
+                    self._apply_move(step_result.operator)
 
         elif self.game_state == GameState.ANIMATING:
             elapsed = pygame.time.get_ticks() - self.animation_start
@@ -1437,10 +1479,9 @@ class GameScreen:
 
     def _start_agent_computation(self):
         agent_name = self.agent_names[self.current_agent_index]
-        agent = self.agents[self.current_agent_index]
         self.game_state = GameState.COMPUTING
         self.status_text = f"Agent {self.current_agent_index} ({agent_name}) is thinking..."
-        self.worker.start(agent, self.env, self.current_agent_index, self.time_limit)
+        self.worker.start(agent_name, self.env, self.current_agent_index, self.time_limit)
 
     def _apply_move(self, operator):
         self.env.apply_operator(self.current_agent_index, operator)
@@ -1477,6 +1518,20 @@ class GameScreen:
         self.game_state = GameState.ANIMATING
         self.animation_start = pygame.time.get_ticks()
 
+    def _advance_turn_after_timeout(self):
+        """Advance the turn after a timed-out move (move is NOT applied)."""
+        prev_agent = self.current_agent_index
+        self.current_agent_index = (self.current_agent_index + 1) % 2
+        if self.current_agent_index == 0:
+            self.current_round += 1
+
+        # For round stepping: if agent 0 just timed out, schedule agent 1
+        if self.step_mode == "round" and prev_agent == 0:
+            self.round_step_needs_second = True
+
+        self.game_state = GameState.ANIMATING
+        self.animation_start = pygame.time.get_ticks()
+
     def _finish_game(self):
         self.game_state = GameState.FINISHED
         self.auto_run = False
@@ -1488,7 +1543,14 @@ class GameScreen:
             self.result_text = (f"Robot {winner} - {self.agent_names[winner]} "
                                 f"({'Blue' if winner == 0 else 'Red'}) wins!  "
                                 f"({balances[0]} vs {balances[1]})")
-        self.status_text = "Game Over"
+        timeout_info = ""
+        if any(self.timeout_flags):
+            parts = []
+            for i, flagged in enumerate(self.timeout_flags):
+                if flagged:
+                    parts.append(f"Agent {i} ({self.agent_names[i]})")
+            timeout_info = f"  [Timeouts: {', '.join(parts)}]"
+        self.status_text = "Game Over" + timeout_info
         if self.logger:
             self.logger.log_result(self.result_text, balances)
             try:

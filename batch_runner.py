@@ -299,7 +299,7 @@ def run_batch(config, progress_callback=None):
 
     # Run games
     results = []
-    batch_start = time.time()
+    batch_start = time.monotonic()
     log_sampling_rate = config.get("log_sampling_rate", 0)
     fail_fast = config.get("fail_fast", False)
 
@@ -327,7 +327,7 @@ def run_batch(config, progress_callback=None):
         if fail_fast and result.error is not None:
             break
 
-    total_wall_time = time.time() - batch_start
+    total_wall_time = time.monotonic() - batch_start
 
     # Compute aggregate statistics
     summary = compute_summary(config, results)
