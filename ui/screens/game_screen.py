@@ -99,6 +99,8 @@ class GameScreen(Screen):
             self.env.load_from_map_data(
                 config.custom_map_data, 2 * self.count_steps,
             )
+            config.seed = self.env.seed
+            self.seed = self.env.seed
         else:
             self.env.generate(self.seed, 2 * self.count_steps)
 

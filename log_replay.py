@@ -217,6 +217,7 @@ class ReplayEngine:
         if self.data.custom_map_data:
             env.load_from_map_data(self.data.custom_map_data,
                                    2 * self.data.count_steps)
+            env.seed = self.data.seed
         else:
             env.generate(self.data.seed, 2 * self.data.count_steps)
         self._checkpoints[0] = env.clone()

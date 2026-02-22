@@ -613,6 +613,24 @@ class TestCustomMapEmbedding:
         assert data2.custom_map_data is None
 
     @pytest.mark.unit
+    def test_replay_engine_restores_seed_for_custom_map(self):
+        """ReplayEngine restores the logged seed after load_from_map_data
+        so that spawn_package produces deterministic results on drop-off."""
+        data = ReplayData(
+            seed=42,
+            count_steps=5,
+            agent_names=["a", "b"],
+            moves=[],
+            source_file="test",
+            custom_map_data=self.SAMPLE_MAP_DATA,
+        )
+        engine = ReplayEngine(data)
+        # After _build_checkpoints, the initial env must have seed == 42
+        # (the logged seed), not whatever random.randint produced inside
+        # load_from_map_data.
+        assert engine.current_env.seed == 42
+
+    @pytest.mark.unit
     def test_gui_header_shows_custom_map(self):
         """format_gui_header includes 'Custom Map: yes' when map data present."""
         lines = format_gui_header({

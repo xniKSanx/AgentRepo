@@ -1,4 +1,4 @@
-{"type":"header","log_version":"1.1","seed":0,"count_steps":5,"agent_names":["greedy","greedy"],"time_limit":1.0,"custom_map_data":{"board_size":5,"robots":[{"position":[0,0],"battery":20,"credit":0},{"position":[4,4],"battery":20,"credit":0}],"packages":[{"position":[2,2],"destination":[3,3],"on_board":true},{"position":[1,1],"destination":[4,0],"on_board":true}],"charge_stations":[{"position":[0,4]},{"position":[4,0]}]}}
+{"type":"header","log_version":"1.1","seed":42,"count_steps":5,"agent_names":["greedy","greedy"],"time_limit":1.0,"custom_map_data":{"board_size":5,"robots":[{"position":[0,0],"battery":20,"credit":0},{"position":[4,4],"battery":20,"credit":0}],"packages":[{"position":[2,2],"destination":[3,3],"on_board":true},{"position":[1,1],"destination":[4,0],"on_board":true}],"charge_stations":[{"position":[0,4]},{"position":[4,0]}]}}
 {"type":"move","round":0,"agent":0,"operator":"move south"}
 {"type":"move","round":0,"agent":1,"operator":"move north"}
 {"type":"move","round":1,"agent":0,"operator":"move south"}
