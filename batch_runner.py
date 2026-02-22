@@ -6,24 +6,21 @@ are provided by the config dataclass itself.
 """
 
 import os
-import sys
 import json
 import csv
 import time
 import random
 import platform
 from datetime import datetime
-from dataclasses import dataclass, asdict
-from typing import List, Optional
+from dataclasses import asdict
 
 from WarehouseEnv import WarehouseEnv
 from agent_registry import VALID_AGENT_NAMES
-from simulation import GameSimulator, GameResult, determine_winner
+from simulation import GameSimulator
 from logging_contract import (
     format_batch_header, format_move_line_batch,
-    jsonl_path_for, write_jsonl_sidecar, LOG_VERSION,
+    jsonl_path_for, write_jsonl_sidecar,
 )
-from config import BatchConfig
 
 
 def resolve_seeds(config):

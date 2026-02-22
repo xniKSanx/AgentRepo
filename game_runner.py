@@ -11,7 +11,7 @@ from datetime import datetime
 
 import pygame
 
-from ui import ScreenId, Screen
+from ui import ScreenId
 from ui.constants import WINDOW_WIDTH, WINDOW_HEIGHT, PANEL_BG
 from ui.screens.opening import OpeningScreen
 from ui.screens.single_setup import SingleGameSetupScreen

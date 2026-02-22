@@ -16,7 +16,7 @@ from ui.widgets import Button
 from ui.board_renderer import load_icons, render_robot_data, render_board
 
 from WarehouseEnv import WarehouseEnv
-from execution import execute_agent_step, StepResult
+from execution import execute_agent_step
 from simulation import determine_winner
 from game_logger import GameLogger
 

@@ -1,0 +1,22 @@
+=== Game 0 ===
+LOG_VERSION: 1.0
+Agents: greedy vs greedy
+Config: time_limit=1.0, count_steps=5
+Seed: 42
+
+--- Initial State ---
+Seed: 42
+  Robot 0: pos=(0, 0) battery=20 credit=0
+  Robot 1: pos=(4, 4) battery=20 credit=0
+
+--- Moves ---
+  Round 0, Agent 0 (greedy): move south
+  Round 0, Agent 1 (greedy): move north
+  Round 1, Agent 0 (greedy): move north
+  Round 1, Agent 1 (greedy): move north
+  Round 2, Agent 0 (greedy): move south
+  Round 2, Agent 1 (greedy): move north
+
+--- Result ---
+Final credits: [0, 0]
+Outcome: Draw

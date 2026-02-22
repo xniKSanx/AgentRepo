@@ -1,0 +1,8 @@
+{"type":"header","log_version":"1.0","seed":42,"count_steps":5,"agent_names":["greedy","greedy"],"time_limit":1.0}
+{"type":"move","round":0,"agent":0,"operator":"move south"}
+{"type":"move","round":0,"agent":1,"operator":"move north"}
+{"type":"move","round":1,"agent":0,"operator":"move north"}
+{"type":"move","round":1,"agent":1,"operator":"move north"}
+{"type":"move","round":2,"agent":0,"operator":"move south"}
+{"type":"move","round":2,"agent":1,"operator":"move north"}
+{"type":"result","final_credits":[0,0],"winner":null,"error":null}

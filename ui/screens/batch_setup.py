@@ -4,7 +4,7 @@ import pygame
 
 from ui import Screen, ScreenId
 from ui.constants import (
-    WINDOW_WIDTH, BLACK, GRAY, DARK_GRAY, BLUE, RED, GREEN, WHITE,
+    WINDOW_WIDTH, BLACK, GRAY, BLUE, RED, GREEN, WHITE,
     get_font,
 )
 from ui.widgets import Button, Dropdown, NumberInput, Checkbox

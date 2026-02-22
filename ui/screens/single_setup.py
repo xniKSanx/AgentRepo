@@ -12,7 +12,7 @@ from ui.constants import (
 )
 from ui.widgets import Button, Dropdown, NumberInput, Checkbox
 from agent_registry import VALID_AGENT_NAMES
-from config import GameConfig, DEFAULT_COUNT_STEPS
+from config import GameConfig
 
 
 class SingleGameSetupScreen(Screen):
