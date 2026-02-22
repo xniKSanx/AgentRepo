@@ -15,7 +15,7 @@ from datetime import datetime
 
 
 # ── Version ──────────────────────────────────────────────────────────
-LOG_VERSION = "1.0"
+LOG_VERSION = "1.1"
 
 # ── Text format templates (used by writers) ──────────────────────────
 
@@ -35,6 +35,7 @@ def format_gui_header(config: dict) -> list:
         f"Time Limit:     {config['time_limit']}s",
         f"Seed:           {config['seed']}",
         f"Max Rounds:     {config['count_steps']}",
+        *([ f"Custom Map:     yes"] if config.get("custom_map_data") else []),
         _BANNER,
         "",
     ]
