@@ -52,16 +52,27 @@ class MapBuilderScreen(Screen):
         self.hovered_cell = None
         self.error_msg = ""
 
-        # Build palette buttons
-        self.palette_buttons = {}
+        # Build icon palette rects
+        self.palette_rects = {}
+        self.hovered_tool = None
+        ICON_BTN_SIZE = 40
+        ICON_BTN_GAP = 6
+        ICON_PADDING = 4
+        icon_render_size = ICON_BTN_SIZE - ICON_PADDING * 2
         bx = 10
-        for tool_id, label, color, _ in MAP_TOOLS:
-            btn_w = max(68, get_font(13).size(label)[0] + 14)
-            btn = Button(bx, 75, btn_w, 30, label, color=GRAY,
-                         hover_color=HOVER_GRAY, text_color=BLACK,
-                         font_size=13)
-            self.palette_buttons[tool_id] = btn
-            bx += btn_w + 4
+        self._palette_icons = {}
+        for tool_id, label, color, fallback_label in MAP_TOOLS:
+            self.palette_rects[tool_id] = pygame.Rect(bx, 75,
+                                                      ICON_BTN_SIZE,
+                                                      ICON_BTN_SIZE)
+            icon_key = TOOL_ICON_MAP.get(tool_id)
+            icon = self.icons.get(icon_key) if icon_key else None
+            if icon:
+                self._palette_icons[tool_id] = pygame.transform.scale(
+                    icon, (icon_render_size, icon_render_size))
+            else:
+                self._palette_icons[tool_id] = None
+            bx += ICON_BTN_SIZE + ICON_BTN_GAP
 
         # Action buttons
         self.clear_btn = Button(
@@ -150,11 +161,20 @@ class MapBuilderScreen(Screen):
     def handle_event(self, event):
         self.error_msg = ""
 
-        # Palette selection
-        for tool_id, btn in self.palette_buttons.items():
-            if btn.handle_event(event):
-                self.selected_tool = tool_id
-                return None
+        # Palette hover tracking
+        if event.type == pygame.MOUSEMOTION:
+            self.hovered_tool = None
+            for tool_id, rect in self.palette_rects.items():
+                if rect.collidepoint(event.pos):
+                    self.hovered_tool = tool_id
+                    break
+
+        # Palette selection (click)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for tool_id, rect in self.palette_rects.items():
+                if rect.collidepoint(event.pos):
+                    self.selected_tool = tool_id
+                    return None
 
         # Grid hover
         if event.type == pygame.MOUSEMOTION:
@@ -202,14 +222,34 @@ class MapBuilderScreen(Screen):
         )
         surface.blit(sub, sub.get_rect(centerx=WINDOW_WIDTH // 2, y=50))
 
-        # Palette buttons
-        for tool_id, btn in self.palette_buttons.items():
+        # Palette icon buttons
+        ICON_PADDING = 4
+        for tool_id, label, fallback_color, fallback_label in MAP_TOOLS:
+            rect = self.palette_rects[tool_id]
+            icon_size = rect.width - ICON_PADDING * 2
+
+            # Background
             if tool_id == self.selected_tool:
-                highlight_rect = btn.rect.inflate(4, 4)
-                pygame.draw.rect(
-                    surface, BLUE, highlight_rect, width=3, border_radius=8,
-                )
-            btn.draw(surface)
+                pygame.draw.rect(surface, BLUE, rect.inflate(4, 4),
+                                 width=3, border_radius=8)
+                pygame.draw.rect(surface, LIGHT_GRAY, rect, border_radius=6)
+            elif tool_id == self.hovered_tool:
+                pygame.draw.rect(surface, HOVER_GRAY, rect, border_radius=6)
+            else:
+                pygame.draw.rect(surface, GRAY, rect, border_radius=6)
+
+            pygame.draw.rect(surface, BLACK, rect, width=1, border_radius=6)
+
+            # Icon or fallback
+            icon_x = rect.x + ICON_PADDING
+            icon_y = rect.y + ICON_PADDING
+            scaled = self._palette_icons.get(tool_id)
+            if scaled:
+                surface.blit(scaled, (icon_x, icon_y))
+            else:
+                _draw_fallback_icon(surface, icon_x, icon_y,
+                                    icon_size, icon_size,
+                                    fallback_color, fallback_label)
 
         # Grid lines — dynamic from board_size
         for i in range(board_size + 1):
