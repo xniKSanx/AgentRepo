@@ -34,6 +34,8 @@ class GameLogger:
                 "seed": cfg.seed,
                 "count_steps": cfg.count_steps,
             }
+            if getattr(cfg, "custom_map_data", None) is not None:
+                header_dict["custom_map_data"] = cfg.custom_map_data
         else:
             header_dict = cfg
         self.entries.extend(format_gui_header(header_dict))
@@ -129,6 +131,7 @@ class GameLogger:
                 "agent_names": [cfg.agent0, cfg.agent1],
                 "time_limit": cfg.time_limit,
             }
+            custom_map = getattr(cfg, "custom_map_data", None)
         else:
             header = {
                 "seed": cfg["seed"],
@@ -136,6 +139,9 @@ class GameLogger:
                 "agent_names": [cfg["agent0"], cfg["agent1"]],
                 "time_limit": cfg["time_limit"],
             }
+            custom_map = cfg.get("custom_map_data")
+        if custom_map is not None:
+            header["custom_map_data"] = custom_map
         write_jsonl_sidecar(
             jsonl_fp, header, self._jsonl_moves, self._jsonl_result
         )

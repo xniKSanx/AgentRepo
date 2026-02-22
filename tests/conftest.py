@@ -36,3 +36,8 @@ def batch_fixture_txt():
 @pytest.fixture
 def batch_fixture_jsonl():
     return os.path.join(FIXTURES_DIR, "batch_game.jsonl")
+
+
+@pytest.fixture
+def custom_map_fixture_txt():
+    return os.path.join(FIXTURES_DIR, "custom_map_game.txt")

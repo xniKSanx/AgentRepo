@@ -463,6 +463,176 @@ class TestGoldenFixtures:
 
 
 # ===================================================================
+# Custom Map Embedding in Logs
+# ===================================================================
+
+class TestCustomMapEmbedding:
+    """Custom map data must survive log write/read roundtrip and be
+    used by ReplayEngine to reconstruct the correct initial state."""
+
+    SAMPLE_MAP_DATA = {
+        "board_size": 5,
+        "robots": [
+            {"position": [0, 0], "battery": 20, "credit": 0},
+            {"position": [4, 4], "battery": 20, "credit": 0},
+        ],
+        "packages": [
+            {"position": [2, 2], "destination": [3, 3], "on_board": True},
+            {"position": [1, 1], "destination": [4, 0], "on_board": True},
+        ],
+        "charge_stations": [
+            {"position": [0, 4]},
+            {"position": [4, 0]},
+        ],
+    }
+
+    @pytest.mark.unit
+    def test_jsonl_roundtrip_with_custom_map(self):
+        """JSONL sidecar roundtrip preserves custom_map_data."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            txt_path = os.path.join(tmpdir, "test.txt")
+            with open(txt_path, "w") as f:
+                f.write("dummy")
+
+            header = {
+                "seed": 0,
+                "count_steps": 5,
+                "agent_names": ["greedy", "greedy"],
+                "time_limit": 1.0,
+                "custom_map_data": self.SAMPLE_MAP_DATA,
+            }
+            moves = [
+                {"round": 0, "agent": 0, "operator": "move south"},
+                {"round": 0, "agent": 1, "operator": "move north"},
+            ]
+            result = {"final_credits": [0, 0], "winner": None, "error": None}
+
+            write_jsonl_sidecar(
+                jsonl_path_for(txt_path), header, moves, result,
+            )
+
+            parsed = read_jsonl_sidecar(txt_path)
+            assert parsed is not None
+            hdr, mvs, res = parsed
+            assert "custom_map_data" in hdr
+            assert hdr["custom_map_data"] == self.SAMPLE_MAP_DATA
+
+    @pytest.mark.unit
+    def test_jsonl_roundtrip_without_custom_map(self):
+        """JSONL sidecar roundtrip without custom_map_data (backward compat)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            txt_path = os.path.join(tmpdir, "test.txt")
+            with open(txt_path, "w") as f:
+                f.write("dummy")
+
+            header = {
+                "seed": 42,
+                "count_steps": 5,
+                "agent_names": ["greedy", "greedy"],
+                "time_limit": 1.0,
+            }
+            moves = []
+            write_jsonl_sidecar(
+                jsonl_path_for(txt_path), header, moves,
+            )
+
+            parsed = read_jsonl_sidecar(txt_path)
+            assert parsed is not None
+            hdr, _, _ = parsed
+            assert hdr.get("custom_map_data") is None
+
+    @pytest.mark.unit
+    def test_parser_populates_custom_map_data(self, custom_map_fixture_txt):
+        """LogParser.parse() sets ReplayData.custom_map_data from JSONL."""
+        data = LogParser.parse(custom_map_fixture_txt)
+        assert data.custom_map_data is not None
+        assert data.custom_map_data["board_size"] == 5
+        assert len(data.custom_map_data["robots"]) == 2
+        assert data.custom_map_data["robots"][0]["position"] == [0, 0]
+
+    @pytest.mark.unit
+    def test_parser_old_log_has_no_custom_map(self, gui_fixture_txt):
+        """Old v1.0 logs parse with custom_map_data=None."""
+        data = LogParser.parse(gui_fixture_txt)
+        assert data.custom_map_data is None
+
+    @pytest.mark.unit
+    def test_replay_engine_uses_custom_map(self, custom_map_fixture_txt):
+        """ReplayEngine reconstructs initial state from custom map data."""
+        data = LogParser.parse(custom_map_fixture_txt)
+        engine = ReplayEngine(data)
+
+        # Initial env must match the custom map, not a seed-generated map
+        env = engine.current_env
+        assert env.robots[0].position == (0, 0)
+        assert env.robots[1].position == (4, 4)
+        assert env.charge_stations[0].position == (0, 4)
+        assert env.charge_stations[1].position == (4, 0)
+
+    @pytest.mark.unit
+    def test_replay_engine_custom_map_navigation(self, custom_map_fixture_txt):
+        """ReplayEngine forward/backward navigation works with custom maps."""
+        data = LogParser.parse(custom_map_fixture_txt)
+        engine = ReplayEngine(data)
+
+        assert engine.is_at_start()
+        # Step through all moves
+        while engine.step_forward():
+            pass
+        assert engine.is_at_end()
+
+        # Go back to start
+        engine.go_to_start()
+        assert engine.is_at_start()
+        # Initial positions preserved after round-trip
+        env = engine.current_env
+        assert env.robots[0].position == (0, 0)
+        assert env.robots[1].position == (4, 4)
+
+    @pytest.mark.unit
+    def test_replay_data_custom_map_field(self):
+        """ReplayData accepts custom_map_data parameter."""
+        data = ReplayData(
+            seed=0,
+            count_steps=5,
+            agent_names=["a", "b"],
+            moves=[],
+            source_file="test",
+            custom_map_data=self.SAMPLE_MAP_DATA,
+        )
+        assert data.custom_map_data == self.SAMPLE_MAP_DATA
+
+        # Default is None
+        data2 = ReplayData(
+            seed=0,
+            count_steps=5,
+            agent_names=["a", "b"],
+            moves=[],
+            source_file="test",
+        )
+        assert data2.custom_map_data is None
+
+    @pytest.mark.unit
+    def test_gui_header_shows_custom_map(self):
+        """format_gui_header includes 'Custom Map: yes' when map data present."""
+        lines = format_gui_header({
+            "agent0": "a", "agent1": "b",
+            "time_limit": 1.0, "seed": 1, "count_steps": 5,
+            "custom_map_data": self.SAMPLE_MAP_DATA,
+        })
+        assert any("Custom Map" in line for line in lines)
+
+    @pytest.mark.unit
+    def test_gui_header_no_custom_map_line(self):
+        """format_gui_header omits 'Custom Map' line for seed-based games."""
+        lines = format_gui_header({
+            "agent0": "a", "agent1": "b",
+            "time_limit": 1.0, "seed": 1, "count_steps": 5,
+        })
+        assert not any("Custom Map" in line for line in lines)
+
+
+# ===================================================================
 # Replay Truncation & Diagnostics
 # Covers: LR-002(a2), LR-002(a1)
 # ===================================================================

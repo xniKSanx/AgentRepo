@@ -10,7 +10,7 @@ regex parsing is used only for legacy logs that lack a sidecar.
 
 import bisect
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 from WarehouseEnv import WarehouseEnv
 from logging_contract import (
@@ -52,6 +52,7 @@ class ReplayData:
     moves: List[Tuple[int, str]]
     source_file: str
     diagnostics: ReplayDiagnostics = field(default_factory=ReplayDiagnostics)
+    custom_map_data: Optional[Dict] = None
 
 
 # ── Log Parser ───────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ class LogParser:
                 agent_names=list(header["agent_names"]),
                 moves=moves,
                 source_file=filepath,
+                custom_map_data=header.get("custom_map_data"),
             )
 
         # 2. Fall back to text parsing
@@ -212,7 +214,11 @@ class ReplayEngine:
     def _build_checkpoints(self):
         """Validate all moves and store checkpoints every N steps."""
         env = WarehouseEnv()
-        env.generate(self.data.seed, 2 * self.data.count_steps)
+        if self.data.custom_map_data:
+            env.load_from_map_data(self.data.custom_map_data,
+                                   2 * self.data.count_steps)
+        else:
+            env.generate(self.data.seed, 2 * self.data.count_steps)
         self._checkpoints[0] = env.clone()
 
         for i, (agent_idx, operator) in enumerate(self.data.moves):
