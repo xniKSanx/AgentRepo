@@ -1,0 +1,42 @@
+[project]
+name = "ai-warehouse-game"
+version = "1.0.0"
+requires-python = ">=3.11"
+
+# ── Ruff ─────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+# E501: line-too-long — pre-existing in non-refactored files (WarehouseEnv, submission, etc.)
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Allow unused imports in __init__.py (re-exports)
+"__init__.py" = ["F401"]
+"ui/__init__.py" = ["F401"]
+# submission.py and WarehouseEnv.py are external/provided files
+"submission.py" = ["E", "F", "W"]
+"WarehouseEnv.py" = ["E", "F", "W"]
+
+# ── Mypy ─────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_configs = true
+# Check project modules only; exclude provided/external files
+exclude = ["submission\\.py", "WarehouseEnv\\.py"]
+
+[[tool.mypy.overrides]]
+module = ["submission", "WarehouseEnv"]
+ignore_errors = true
+
+# ── Pytest ───────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests for audit-critical contracts",
+    "smoke: Import-time and boundary smoke tests",
+]

@@ -1,4 +1,4 @@
-from WarehouseEnv import WarehouseEnv, manhattan_distance
+from WarehouseEnv import WarehouseEnv
 import random
 
 

@@ -14,7 +14,7 @@ from typing import List, Tuple, Optional
 
 from WarehouseEnv import WarehouseEnv
 from logging_contract import (
-    detect_version, read_jsonl_sidecar, jsonl_path_for,
+    detect_version, read_jsonl_sidecar,
     GUI_SEED, GUI_STEPS, GUI_AGENT0, GUI_AGENT1, GUI_MOVE, GUI_ERROR,
     BATCH_SEED, BATCH_STEPS, BATCH_AGENTS, BATCH_MOVE,
 )

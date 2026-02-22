@@ -2,7 +2,7 @@
 
 from ui import Screen, ScreenId
 from ui.constants import (
-    WINDOW_WIDTH, BLACK, DARK_GRAY, GRAY, GREEN, BLUE, HOVER_GRAY,
+    WINDOW_WIDTH, BLACK, DARK_GRAY, GREEN, BLUE, HOVER_GRAY,
     get_font,
 )
 from ui.widgets import Button

@@ -1,0 +1,29 @@
+============================================================
+AI WAREHOUSE GAME LOG
+============================================================
+LOG_VERSION: 1.0
+Date: 2026-01-15 10:00:00
+Agent 0 (Blue): greedy
+Agent 1 (Red):  greedy
+Time Limit:     1.0s
+Seed:           42
+Max Rounds:     5
+============================================================
+
+--- INITIAL STATE ---
+  Robot 0: position=(0, 0), battery=20, credit=0
+  Robot 1: position=(4, 4), battery=20, credit=0
+
+[Round 0] Agent 0 (greedy): move south
+[Round 0] Agent 1 (greedy): move north
+[Round 1] Agent 0 (greedy): move north
+[Round 1] Agent 1 (greedy): move north
+[Round 2] Agent 0 (greedy): move south
+[Round 2] Agent 1 (greedy): move north
+
+============================================================
+GAME RESULT
+============================================================
+Final Balances: Agent 0 = 0, Agent 1 = 0
+Result: Draw
+============================================================

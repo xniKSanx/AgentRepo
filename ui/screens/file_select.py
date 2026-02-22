@@ -7,7 +7,6 @@ import pygame
 from ui import Screen, ScreenId
 from ui.constants import (
     WINDOW_WIDTH, BLACK, GRAY, DARK_GRAY, WHITE, RED, GREEN,
-    HOVER_GRAY,
     get_font,
 )
 from ui.widgets import Button
